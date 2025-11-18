@@ -7,6 +7,8 @@ from .. import dialog, tools, chat
 from ...ollama_models import OLLAMA_MODELS
 from ...constants import data_dir, cache_dir, TITLE_GENERATION_PROMPT_OLLAMA, MAX_TOKENS_TITLE_GENERATION
 from ...sql_manager import generate_uuid, dict_to_metadata_string, Instance as SQL
+from ...core.process_manager import ProcessManager, ProcessConfig
+from ...core.error_handler import ErrorHandler, ErrorCategory
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +25,7 @@ class BaseInstance:
                 bot_message.get_root().global_footer.toggle_action_button(False)
             except:
                 pass
-        
+
             chat_element.busy = True
             chat_element.set_visible_child_name('content')
 
@@ -493,11 +495,16 @@ class OllamaManaged(BaseInstance):
 
     def __init__(self, instance_id:str, properties:dict):
         self.instance_id = instance_id
-        self.process = None
+        self.process_manager = ProcessManager(enable_health_monitor=True)
+        self.process = None  # Keep for backward compatibility
         self.log_raw = ''
         self.log_summary = ('', ['dim-label'])
         self.properties = {}
         self.row = None
+
+        # Register crash callback
+        self.process_manager.register_crash_callback(self._on_process_crash)
+
         for key in self.default_properties:
             if key == 'overrides':
                 self.properties[key] = {}
@@ -505,6 +512,23 @@ class OllamaManaged(BaseInstance):
                     self.properties[key][override] = properties.get(key, {}).get(override, self.default_properties.get(key).get(override))
             else:
                 self.properties[key] = properties.get(key, self.default_properties.get(key))
+
+    def _on_process_crash(self):
+        """Callback invoked when the Ollama process crashes."""
+        logger.error("Ollama process crashed")
+        self.log_summary = (_("Integrated Ollama instance crashed"), ['dim-label', 'error'])
+        self.process = None
+
+        # Notify user if row is available
+        if self.row:
+            try:
+                GLib.idle_add(
+                    dialog.show_toast,
+                    _("Ollama instance crashed unexpectedly"),
+                    self.row.get_root()
+                )
+            except Exception as e:
+                logger.error(f"Failed to show crash notification: {e}")
 
     def log_output(self, pipe):
         AMD_support_label = "\n<a href='https://github.com/Jeffser/Alpaca/wiki/Installing-Ollama'>{}</a>".format(_('Alpaca Support'))
@@ -523,70 +547,134 @@ class OllamaManaged(BaseInstance):
                     elif 'msg="amdgpu is supported"' in line:
                         self.log_summary = (_("Using AMD GPU type '{}'").format(line.split('=')[-1].replace('\n', '')), ['dim-label', 'success'])
             except Exception as e:
-                pass
+                ErrorHandler.log_error(
+                    message="Error reading Ollama process output",
+                    exception=e,
+                    context={'instance_id': self.instance_id}
+                )
 
     def stop(self):
-        if self.process:
+        """Stop the Ollama instance using ProcessManager."""
+        if self.process_manager.is_running():
             logger.info("Stopping Alpaca's Ollama instance")
             try:
-                # Check if process is still alive before trying to stop it
-                if self.process.poll() is None:
-                    os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-                    # Wait with timeout to avoid hanging indefinitely
-                    try:
-                        self.process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        logger.warning("Ollama process didn't stop gracefully, forcing kill")
-                        os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
-                        self.process.wait(timeout=2)
-            except (ProcessLookupError, OSError) as e:
-                logger.info(f"Process already stopped or not accessible: {e}")
+                success = self.process_manager.stop(timeout=5)
+                if success:
+                    self.process = None
+                    self.log_summary = (_("Integrated Ollama instance is not running"), ['dim-label'])
+                    logger.info("Stopped Alpaca's Ollama instance")
+                else:
+                    error_msg = "Failed to stop Ollama instance"
+                    logger.error(error_msg)
+                    ErrorHandler.log_error(
+                        message=error_msg,
+                        context={'instance_id': self.instance_id}
+                    )
             except Exception as e:
-                logger.error(f"Error stopping Ollama process: {e}")
-            finally:
+                ErrorHandler.handle_exception(
+                    exception=e,
+                    context="OllamaManaged.stop",
+                    user_message=_("Failed to stop Ollama instance"),
+                    show_dialog=False,
+                    parent_widget=self.row.get_root() if self.row else None
+                )
                 self.process = None
                 self.log_summary = (_("Integrated Ollama instance is not running"), ['dim-label'])
-                logger.info("Stopped Alpaca's Ollama instance")
 
     def start(self):
-        if shutil.which('ollama') and not self.process:
-            try:
-                params = self.properties.get('overrides', {}).copy()
-                params["OLLAMA_HOST"] = self.properties.get('url')
-                params["OLLAMA_MODELS"] = self.properties.get('model_directory')
-                if self.properties.get("expose"):
-                    params["OLLAMA_ORIGINS"] = "chrome-extension://*,moz-extension://*,safari-web-extension://*,http://0.0.0.0,http://127.0.0.1"
-                else:
-                    params["OLLAMA_ORIGINS"] = params.get("OLLAMA_HOST")
-                for key in list(params):
-                    if not params.get(key):
-                        del params[key]
-                self.process = subprocess.Popen(
-                    ["ollama", "serve"],
-                    env={**os.environ, **params},
-                    stderr=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    text=True,
-                    preexec_fn=os.setsid
-                )
-
-                threading.Thread(target=self.log_output, args=(self.process.stdout,), daemon=True).start()
-                threading.Thread(target=self.log_output, args=(self.process.stderr,), daemon=True).start()
-                logger.info("Starting Alpaca's Ollama instance...")
-                logger.info("Started Alpaca's Ollama instance")
-                v_str = subprocess.check_output("ollama -v", shell=True).decode('utf-8')
-                logger.info(v_str.split('\n')[1].strip('Warning: ').strip())
-            except Exception as e:
+        """Start the Ollama instance using ProcessManager."""
+        if not shutil.which('ollama'):
+            error_msg = "Ollama executable not found in PATH"
+            logger.error(error_msg)
+            ErrorHandler.log_error(
+                message=error_msg,
+                context={'instance_id': self.instance_id}
+            )
+            if self.row:
                 dialog.simple_error(
-                    parent = self.row.get_root() if self.row else None,
-                    title = _('Instance Error'),
-                    body = _('Managed Ollama instance failed to start'),
-                    error_log = e
+                    parent=self.row.get_root(),
+                    title=_('Instance Error'),
+                    body=_('Ollama is not installed or not in PATH'),
+                    error_log=None
                 )
-                logger.error(e)
-                if self.row:
-                    self.row.get_parent().unselect_all()
-            self.log_summary = (_("Integrated Ollama instance is running"), ['dim-label', 'success'])
+            return
+
+        if self.process_manager.is_running():
+            logger.info("Ollama instance already running")
+            return
+
+        try:
+            # Prepare environment variables
+            params = self.properties.get('overrides', {}).copy()
+            params["OLLAMA_HOST"] = self.properties.get('url')
+            params["OLLAMA_MODELS"] = self.properties.get('model_directory')
+            if self.properties.get("expose"):
+                params["OLLAMA_ORIGINS"] = "chrome-extension://*,moz-extension://*,safari-web-extension://*,http://0.0.0.0,http://127.0.0.1"
+            else:
+                params["OLLAMA_ORIGINS"] = params.get("OLLAMA_HOST")
+
+            # Remove empty parameters
+            for key in list(params):
+                if not params.get(key):
+                    del params[key]
+
+            # Merge with current environment
+            env = {**os.environ, **params}
+
+            # Create process configuration
+            config = ProcessConfig(
+                command=["ollama", "serve"],
+                env=env,
+                timeout=30
+            )
+
+            logger.info("Starting Alpaca's Ollama instance...")
+
+            # Start the process using ProcessManager
+            success = self.process_manager.start(config)
+
+            if success:
+                # Get the underlying process for log output (temporary compatibility)
+                # Note: This accesses a private member, which is not ideal but needed for log_output
+                self.process = self.process_manager._process
+
+                if self.process:
+                    # Start log monitoring threads
+                    threading.Thread(target=self.log_output, args=(self.process.stdout,), daemon=True).start()
+                    threading.Thread(target=self.log_output, args=(self.process.stderr,), daemon=True).start()
+
+                logger.info("Started Alpaca's Ollama instance")
+
+                # Log Ollama version
+                try:
+                    v_str = subprocess.check_output("ollama -v", shell=True).decode('utf-8')
+                    logger.info(v_str.split('\n')[1].strip('Warning: ').strip())
+                except Exception as e:
+                    logger.warning(f"Could not get Ollama version: {e}")
+
+                self.log_summary = (_("Integrated Ollama instance is running"), ['dim-label', 'success'])
+            else:
+                raise Exception("ProcessManager failed to start Ollama")
+
+        except Exception as e:
+            ErrorHandler.handle_exception(
+                exception=e,
+                context="OllamaManaged.start",
+                user_message=_("Managed Ollama instance failed to start"),
+                show_dialog=True,
+                parent_widget=self.row.get_root() if self.row else None
+            )
+
+            if self.row:
+                dialog.simple_error(
+                    parent=self.row.get_root(),
+                    title=_('Instance Error'),
+                    body=_('Managed Ollama instance failed to start'),
+                    error_log=e
+                )
+                self.row.get_parent().unselect_all()
+
+            self.log_summary = (_("Integrated Ollama instance failed to start"), ['dim-label', 'error'])
 
 class Ollama(BaseInstance):
     instance_type = 'ollama'
