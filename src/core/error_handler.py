@@ -32,7 +32,7 @@ class ErrorCategory(Enum):
 
 class AlpacaError(Exception):
     """Base exception for Alpaca errors."""
-    
+
     def __init__(
         self,
         message: str,
@@ -52,10 +52,10 @@ class AlpacaError(Exception):
 
 class ErrorHandler:
     """Centralized error handling and logging."""
-    
+
     _logger = logging.getLogger('alpaca.error_handler')
     _error_log: list = []
-    
+
     @classmethod
     def handle_exception(
         cls,
@@ -67,7 +67,7 @@ class ErrorHandler:
     ) -> None:
         """
         Handle exceptions with logging and user notification.
-        
+
         Args:
             exception: The exception that occurred
             context: Context string describing where the error occurred
@@ -81,13 +81,13 @@ class ErrorHandler:
             exception=exception,
             context={'context': context}
         )
-        
+
         # Show user notification if requested
         if show_dialog:
             message = user_message or cls.create_user_message(exception)
             # In a real implementation, this would show a GTK dialog
             cls._logger.info(f"Would show dialog: {message}")
-    
+
     @classmethod
     def log_error(
         cls,
@@ -97,30 +97,30 @@ class ErrorHandler:
     ) -> None:
         """
         Log error with context and stack trace.
-        
+
         Args:
             message: Error message to log
             exception: Optional exception object
             context: Optional context dictionary
         """
         timestamp = datetime.now()
-        
+
         # Build log entry
         log_entry = {
             'timestamp': timestamp.isoformat(),
             'message': message,
             'context': context or {}
         }
-        
+
         # Add exception details if provided
         if exception:
             log_entry['exception_type'] = type(exception).__name__
             log_entry['exception_message'] = str(exception)
             log_entry['stack_trace'] = traceback.format_exc()
-        
+
         # Store in error log
         cls._error_log.append(log_entry)
-        
+
         # Log to standard logger
         if exception:
             cls._logger.error(
@@ -131,24 +131,53 @@ class ErrorHandler:
             )
         else:
             cls._logger.error(f"{message}\nContext: {context}")
-    
+
+    @classmethod
+    def log_warning(
+        cls,
+        message: str,
+        context: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Log warning with context.
+
+        Args:
+            message: Warning message to log
+            context: Optional context dictionary
+        """
+        timestamp = datetime.now()
+
+        # Build log entry
+        log_entry = {
+            'timestamp': timestamp.isoformat(),
+            'level': 'WARNING',
+            'message': message,
+            'context': context or {}
+        }
+
+        # Store in error log
+        cls._error_log.append(log_entry)
+
+        # Log to standard logger
+        cls._logger.warning(f"{message}\nContext: {context}")
+
     @classmethod
     def create_user_message(cls, exception: Exception) -> str:
         """
         Convert technical exception to user-friendly message.
-        
+
         Args:
             exception: The exception to convert
-            
+
         Returns:
             User-friendly error message
         """
         if isinstance(exception, AlpacaError):
             return exception.user_message or exception.message
-        
+
         # Map common exception types to user-friendly messages
         exception_type = type(exception).__name__
-        
+
         user_messages = {
             'ConnectionError': 'Unable to connect to the service. Please check your network connection.',
             'TimeoutError': 'The operation took too long to complete. Please try again.',
@@ -158,17 +187,17 @@ class ErrorHandler:
             'KeyError': 'Required information is missing.',
             'sqlite3.OperationalError': 'Database operation failed. Please try again.',
         }
-        
+
         return user_messages.get(
             exception_type,
             f'An unexpected error occurred: {exception_type}'
         )
-    
+
     @classmethod
     def get_error_log(cls) -> list:
         """Get the complete error log."""
         return cls._error_log.copy()
-    
+
     @classmethod
     def clear_error_log(cls) -> None:
         """Clear the error log (useful for testing)."""
