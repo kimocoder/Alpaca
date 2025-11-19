@@ -35,11 +35,6 @@ blueprints = files(
   'ui/widgets/activities/background_remover.blp',
   'ui/widgets/activities/background_remover_image.blp',
   'ui/widgets/activities/camera.blp',
-  'ui/widgets/activities/code_editor.blp',
-  'ui/widgets/activities/attachment_creator.blp',
-  'ui/widgets/activities/terminal.blp',
-  'ui/widgets/activities/code_runner.blp',
-  'ui/widgets/activities/transcriber.blp',
 )
 
 blueprints = custom_target('blueprints',
