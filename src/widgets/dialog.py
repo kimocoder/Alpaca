@@ -329,27 +329,48 @@ def simple_error(parent:Gtk.Widget, title:str, body:str, error_log:str, callback
     GLib.idle_add(dialog.present, parent)
 
 def simple_file(parent:Gtk.Widget, file_filters:list, callback:callable):
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"simple_file called with {len(file_filters)} filters")
+    
     filter_list = Gio.ListStore.new(Gtk.FileFilter)
 
     for item in file_filters:
         filter_list.append(item)
 
-    def __open_finish_wrapper(dialog, result):
+    def __open_finish_callback(dialog, result):
+        logger.info("__open_finish_callback called - user interacted with dialog")
         try:
-            return dialog.open_finish(result)
-        except gi.repository.GLib.GError:
-            return
+            file = dialog.open_finish(result)
+            logger.info(f"open_finish returned: {file}")
+            if file:
+                logger.info(f"File selected: {file.get_path()}")
+                callback(file)
+            else:
+                logger.warning("File dialog completed but no file was selected")
+        except gi.repository.GLib.GError as e:
+            # Log the error for debugging
+            # Error code 2 means "Dismissed by user" which is normal when canceling
+            if "Dismissed by user" in str(e):
+                logger.debug(f"File dialog cancelled by user")
+            else:
+                logger.error(f"File dialog error: {e}")
 
     file_dialog = Gtk.FileDialog(
         default_filter=file_filters[0],
         filters=filter_list
     )
-
+    
+    logger.info("FileDialog created, calling open()")
+    
     file_dialog.open(
         parent,
         None,
-        lambda file_dialog, result: callback(__open_finish_wrapper(file_dialog, result)) if result else None
+        __open_finish_callback
     )
+    
+    logger.info("FileDialog.open() called - waiting for user interaction")
 
 def simple_directory(parent:Gtk.Widget, callback:callable):
     def __select_folder_finish_wrapper(dialog, result):

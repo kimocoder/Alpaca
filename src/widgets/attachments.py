@@ -83,6 +83,7 @@ def extract_online_image(image_url:str, max_size:int) -> str | None:
         image_path = os.path.join(cache_dir, 'image_web.jpg')
         with open(image_path, 'wb') as handler:
             handler.write(image_response.content)
+        # extract_image now includes compression
         image_data = extract_image(image_path, max_size)
         #if os.path.isfile(image_path):
             #os.remove(image_path)
@@ -90,6 +91,9 @@ def extract_online_image(image_url:str, max_size:int) -> str | None:
 
 def extract_image(image_path:str, max_size:int) -> str:
     #Normal Image: 640, Profile Pictures: 128
+    # Import the compression utility
+    from ..utils.image_utils import compress_image_base64
+    
     with Image.open(image_path) as img:
         width, height = img.size
         if width > height:
@@ -102,7 +106,15 @@ def extract_image(image_path:str, max_size:int) -> str:
         with BytesIO() as output:
             resized_img.save(output, format="PNG")
             image_data = output.getvalue()
-        return base64.b64encode(image_data).decode("utf-8")
+        
+        # Compress the image to max 1MB before encoding
+        base64_encoded = base64.b64encode(image_data).decode("utf-8")
+        try:
+            compressed_base64 = compress_image_base64(base64_encoded, max_size_kb=1024)
+            return compressed_base64
+        except Exception as e:
+            logger.warning(f"Failed to compress image, using original: {e}")
+            return base64_encoded
 
 class AttachmentImagePage(Gtk.ScrolledWindow):
     __gtype_name__ = 'AlpacaAttachmentImagePage'
@@ -773,57 +785,101 @@ class GlobalAttachmentContainer(AttachmentContainer):
 
     def on_attachment(self, file:Gio.File, remove_original:bool=False):
         if not file:
+            logger.warning("File attachment cancelled or failed - no file provided")
             return
-        file_types = {
-            "plain_text": ["txt", "md"],
-            "code": ["c", "h", "css", "html", "js", "ts", "py", "java", "json", "xml", "asm", "nasm",
-                    "cs", "csx", "cpp", "cxx", "cp", "hxx", "inc", "csv", "lsp", "lisp", "el", "emacs",
-                    "l", "cu", "dockerfile", "glsl", "g", "lua", "php", "rb", "ru", "rs", "sql", "sh", "p8",
-                    "yaml"],
-            "image": ["png", "jpeg", "jpg", "webp", "gif"],
-            "pdf": ["pdf"],
-            "odt": ["odt"],
-            "docx": ["docx"],
-            "pptx": ["pptx"],
-            'audio': ["wav", "mp3", "flac", "ogg", "oga", "m4a", "acc", "aiff", "aif", "opus", "webm",
-                    "mp4", "mkv", "mov", "avi"]
-        }
-        if file.query_info("standard::content-type", 0, None).get_content_type() == 'text/plain':
-            extension = 'txt'
-        else:
-            extension = file.get_path().split(".")[-1]
-        found_types = [key for key, value in file_types.items() if extension in value]
-        if len(found_types) == 0:
-            file_type = 'plain_text'
-        else:
-            file_type = found_types[0]
-        if file_type == 'image':
-            content = extract_image(file.get_path(), self.get_root().settings.get_value('max-image-size').unpack())
-            if not self.get_root().get_selected_model().get_vision():
-                dialog.show_toast(_("This model might not be compatible with image recognition"), self.get_root())
-        elif file_type == 'audio':
-            content = 'AUDIO NOT TRANSCRIBED'
-        else:
-            content = extract_content(file_type, file.get_path())
-        if content:
-            file_name = os.path.basename(file.get_path())
-            if file_type == 'code':
-                file_name = os.path.splitext(file_name)[0]
-            if file_type != 'audio':
-                attachment = Attachment(
-                    file_id="-1",
-                    file_name=file_name,
-                    file_type=file_type,
-                    file_content=content
-                )
-                self.add_attachment(attachment)
-            elif voice.libraries.get('whisper'):
-                activities.show_activity(
-                    activities.Transcriber(file),
-                    self.get_root()
-                )
+        
+        try:
+            # Verify file exists and is accessible
+            if not file.query_exists():
+                logger.error(f"File does not exist: {file.get_path()}")
+                dialog.show_toast(_("File not found"), self.get_root())
+                return
+        except Exception as e:
+            logger.error(f"Error checking file existence: {e}")
+            dialog.show_toast(_("Could not access file"), self.get_root())
+            return
+        
+        try:
+            file_types = {
+                "plain_text": ["txt", "md"],
+                "code": ["c", "h", "css", "html", "js", "ts", "py", "java", "json", "xml", "asm", "nasm",
+                        "cs", "csx", "cpp", "cxx", "cp", "hxx", "inc", "csv", "lsp", "lisp", "el", "emacs",
+                        "l", "cu", "dockerfile", "glsl", "g", "lua", "php", "rb", "ru", "rs", "sql", "sh", "p8",
+                        "yaml"],
+                "image": ["png", "jpeg", "jpg", "webp", "gif"],
+                "pdf": ["pdf"],
+                "odt": ["odt"],
+                "docx": ["docx"],
+                "pptx": ["pptx"],
+                'audio': ["wav", "mp3", "flac", "ogg", "oga", "m4a", "acc", "aiff", "aif", "opus", "webm",
+                        "mp4", "mkv", "mov", "avi"]
+            }
+            
+            # Get file extension
+            try:
+                if file.query_info("standard::content-type", 0, None).get_content_type() == 'text/plain':
+                    extension = 'txt'
+                else:
+                    file_path = file.get_path()
+                    if not file_path:
+                        logger.error("Could not get file path")
+                        dialog.show_toast(_("Could not read file path"), self.get_root())
+                        return
+                    extension = file_path.split(".")[-1].lower()
+            except Exception as e:
+                logger.error(f"Error getting file info: {e}")
+                dialog.show_toast(_("Could not read file information"), self.get_root())
+                return
+            
+            found_types = [key for key, value in file_types.items() if extension in value]
+            if len(found_types) == 0:
+                file_type = 'plain_text'
+            else:
+                file_type = found_types[0]
+            
+            # Extract content based on file type
+            content = None
+            try:
+                if file_type == 'image':
+                    content = extract_image(file.get_path(), self.get_root().settings.get_value('max-image-size').unpack())
+                    if not self.get_root().get_selected_model().get_vision():
+                        dialog.show_toast(_("This model might not be compatible with image recognition"), self.get_root())
+                elif file_type == 'audio':
+                    content = 'AUDIO NOT TRANSCRIBED'
+                else:
+                    content = extract_content(file_type, file.get_path())
+            except Exception as e:
+                logger.error(f"Error extracting content from file: {e}")
+                dialog.show_toast(_("Could not read file content"), self.get_root())
+                return
+            
+            if content:
+                file_name = os.path.basename(file.get_path())
+                if file_type == 'code':
+                    file_name = os.path.splitext(file_name)[0]
+                if file_type != 'audio':
+                    attachment = Attachment(
+                        file_id="-1",
+                        file_name=file_name,
+                        file_type=file_type,
+                        file_content=content
+                    )
+                    self.add_attachment(attachment)
+                    logger.info(f"Successfully attached file: {file_name}")
+                elif voice.libraries.get('whisper'):
+                    activities.show_activity(
+                        activities.Transcriber(file),
+                        self.get_root()
+                    )
+            else:
+                logger.warning(f"No content extracted from file: {file.get_path()}")
+                dialog.show_toast(_("Could not extract content from file"), self.get_root())
+        except Exception as e:
+            logger.error(f"Unexpected error in on_attachment: {e}", exc_info=True)
+            dialog.show_toast(_("Failed to attach file"), self.get_root())
 
     def attachment_request(self, block_images:bool=False):
+        logger.info("attachment_request called - opening file dialog")
         ff = Gtk.FileFilter()
         ff.set_name(_('Any compatible Alpaca attachment'))
         file_filters = [ff]
@@ -852,11 +908,13 @@ class GlobalAttachmentContainer(AttachmentContainer):
             file_filter = Gtk.FileFilter()
             file_filter.add_pixbuf_formats()
             file_filters.append(file_filter)
+        logger.info(f"Calling dialog.simple_file with {len(file_filters)} filters")
         dialog.simple_file(
             parent = self.get_root(),
             file_filters = file_filters,
             callback = self.on_attachment
         )
+        logger.info("dialog.simple_file call completed")
 
     def request_screenshot(self):
         def on_response(portal, res, user_data):

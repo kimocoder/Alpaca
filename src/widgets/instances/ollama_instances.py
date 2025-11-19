@@ -9,6 +9,7 @@ from ...constants import data_dir, cache_dir, TITLE_GENERATION_PROMPT_OLLAMA, MA
 from ...sql_manager import generate_uuid, dict_to_metadata_string, Instance as SQL
 from ...core.process_manager import ProcessManager, ProcessConfig
 from ...core.error_handler import ErrorHandler, ErrorCategory
+from ...core.network_client import NetworkClient, NetworkError, NetworkStatus
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,17 @@ logger = logging.getLogger(__name__)
 class BaseInstance:
     description = None
     process = None
+    _network_client = None
+
+    def get_network_client(self) -> NetworkClient:
+        """Get or create NetworkClient for this instance."""
+        if self._network_client is None:
+            self._network_client = NetworkClient(
+                base_url=self.properties.get('url'),
+                timeout=30,
+                streaming_timeout=300
+            )
+        return self._network_client
 
     def prepare_chat(self, bot_message):
         chat_element = bot_message.get_ancestor(chat.Chat)
@@ -71,14 +83,18 @@ class BaseInstance:
                 "tools": [v.get_metadata() for v in available_tools.values()],
                 "think": False
             }
-            response = requests.post(
-                '{}/api/chat'.format(self.properties.get('url')),
-                headers={
-                    "Authorization": "Bearer {}".format(self.properties.get('api')),
-                    "Content-Type": "application/json"
-                },
-                data=json.dumps(params)
-            )
+            
+            client = self.get_network_client()
+            # Prepare headers
+            headers = {
+                "Content-Type": "application/json"
+            }
+            if self.properties.get('api'):
+                headers["Authorization"] = "Bearer {}".format(self.properties.get('api'))
+            
+            # Make request with NetworkClient
+            client.session.headers.update(headers)
+            response = client.post('api/chat', json=params, stream=False)
             tool_calls = response.json().get('message', {}).get('tool_calls', [])
             for tc in tool_calls:
                 function = tc.get('function')
@@ -175,16 +191,22 @@ class BaseInstance:
         data = {'done': True}
         if chat.busy:
             try:
-                response = requests.post(
-                    '{}/api/chat'.format(self.properties.get('url')),
-                    headers={
-                        "Authorization": "Bearer {}".format(self.properties.get('api')),
-                        "Content-Type": "application/json"
-                    },
-                    data=json.dumps(params),
-                    stream=True
-                )
+                client = self.get_network_client()
+                
+                # Prepare headers
+                headers = {
+                    "Content-Type": "application/json"
+                }
+                if self.properties.get('api'):
+                    headers["Authorization"] = "Bearer {}".format(self.properties.get('api'))
+                
+                # Update session headers
+                client.session.headers.update(headers)
+                
+                # Make streaming request with NetworkClient
+                response = client.post('api/chat', json=params, stream=True)
                 bot_message.block_container.clear()
+                
                 if response.status_code == 200:
                     for line in response.iter_lines():
                         if line:
@@ -204,6 +226,17 @@ class BaseInstance:
                         SQL.insert_or_update_attachment(bot_message, attachment)
                         bot_message.update_message("🦙 Just a quick heads-up! To access the Ollama cloud models, you'll need to log into your Ollama account first.")
                     logger.error(response.content)
+            except NetworkError as e:
+                # Handle network-specific errors
+                ErrorHandler.handle_exception(
+                    exception=e,
+                    context="BaseInstance.generate_response",
+                    user_message=_("Network error during message generation. Please check your connection."),
+                    show_dialog=True,
+                    parent_widget=bot_message.get_root()
+                )
+                if self.row:
+                    self.row.get_parent().unselect_all()
             except Exception as e:
                 dialog.simple_error(
                     parent = bot_message.get_root(),
@@ -256,14 +289,20 @@ class BaseInstance:
         if self.properties.get("override_parameters"):
             params["options"]["num_ctx"] = self.properties.get('num_ctx', 16384)
         try:
-            response = requests.post(
-                '{}/api/chat'.format(self.properties.get('url')),
-                headers={
-                    "Authorization": "Bearer {}".format(self.properties.get('api')),
-                    "Content-Type": "application/json"
-                },
-                data=json.dumps(params)
-            )
+            client = self.get_network_client()
+            
+            # Prepare headers
+            headers = {
+                "Content-Type": "application/json"
+            }
+            if self.properties.get('api'):
+                headers["Authorization"] = "Bearer {}".format(self.properties.get('api'))
+            
+            # Update session headers
+            client.session.headers.update(headers)
+            
+            # Make request with NetworkClient
+            response = client.post('api/chat', json=params, stream=False)
             data = json.loads(response.json().get('message', {}).get('content', '{"title": "New Chat"}'))
             generated_title = data.get('title').replace('\n', '').strip()
 
@@ -308,14 +347,31 @@ class BaseInstance:
         if not self.process:
             self.start()
         try:
-            response = requests.get(
-                '{}/api/tags'.format(self.properties.get('url')),
-                headers={
-                    'Authorization': 'Bearer {}'.format(self.properties.get('api'))
-                }
-            )
+            client = self.get_network_client()
+            
+            # Prepare headers
+            headers = {}
+            if self.properties.get('api'):
+                headers['Authorization'] = 'Bearer {}'.format(self.properties.get('api'))
+            
+            # Update session headers
+            client.session.headers.update(headers)
+            
+            # Make request with NetworkClient
+            response = client.get('api/tags')
             if response.status_code == 200:
                 return json.loads(response.text).get('models')
+        except NetworkError as e:
+            # Handle network-specific errors
+            ErrorHandler.handle_exception(
+                exception=e,
+                context="BaseInstance.get_local_models",
+                user_message=_("Could not retrieve models. Please check your connection."),
+                show_dialog=True,
+                parent_widget=self.row.get_root() if self.row else None
+            )
+            if self.row:
+                self.row.get_parent().unselect_all()
         except Exception as e:
             dialog.simple_error(
                 parent = self.row.get_root() if self.row else None,
@@ -345,19 +401,25 @@ class BaseInstance:
         if not self.process:
             self.start()
         try:
-            response = requests.post(
-                '{}/api/show'.format(self.properties.get('url')),
-                headers={
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer {}'.format(self.properties.get('api'))
-                },
-                data=json.dumps({
-                    "name": model_name
-                }),
-                stream=False
-            )
+            client = self.get_network_client()
+            
+            # Prepare headers
+            headers = {
+                'Content-Type': 'application/json'
+            }
+            if self.properties.get('api'):
+                headers['Authorization'] = 'Bearer {}'.format(self.properties.get('api'))
+            
+            # Update session headers
+            client.session.headers.update(headers)
+            
+            # Make request with NetworkClient
+            response = client.post('api/show', json={"name": model_name}, stream=False)
             if response.status_code == 200:
                 return json.loads(response.text)
+        except NetworkError as e:
+            # Log network errors but don't show dialog (this is called frequently)
+            logger.warning(f"Network error getting model info for {model_name}: {e}")
         except Exception as e:
             logger.error(e)
         return {}
@@ -366,16 +428,22 @@ class BaseInstance:
         if not self.process:
             self.start()
         try:
-            response = requests.post(
-                '{}/api/pull'.format(self.properties.get('url')),
-                headers={
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer {}'.format(self.properties.get('api'))
-                },
-                data=json.dumps({
-                    'name': model.get_name(),
-                    'stream': True
-                }),
+            client = self.get_network_client()
+            
+            # Prepare headers
+            headers = {
+                'Content-Type': 'application/json'
+            }
+            if self.properties.get('api'):
+                headers['Authorization'] = 'Bearer {}'.format(self.properties.get('api'))
+            
+            # Update session headers
+            client.session.headers.update(headers)
+            
+            # Make streaming request with NetworkClient
+            response = client.post(
+                'api/pull',
+                json={'name': model.get_name(), 'stream': True},
                 stream=True
             )
             if response.status_code == 200:
@@ -389,6 +457,14 @@ class BaseInstance:
                         if data.get('status') == 'success':
                             model.update_progressbar(-1)
                             return
+        except NetworkError as e:
+            # Handle network errors during model pull
+            ErrorHandler.log_error(
+                message=f"Network error pulling model {model.get_name()}",
+                exception=e,
+                context={'model': model.get_name()}
+            )
+            model.get_parent().get_parent().remove(model.get_parent())
         except Exception as e:
             model.get_parent().get_parent().remove(model.get_parent())
             logger.error(e)
@@ -397,40 +473,72 @@ class BaseInstance:
         if not self.process:
             self.start()
         try:
-            return requests.head(
-                '{}/api/blobs/sha256:{}'.format(self.properties.get('url'), sha256),
-                headers={
-                    'Authorization': 'Bearer {}'.format(self.properties.get('api'))
-                }
-            ).status_code == 200
+            client = self.get_network_client()
+            
+            # Prepare headers
+            headers = {}
+            if self.properties.get('api'):
+                headers['Authorization'] = 'Bearer {}'.format(self.properties.get('api'))
+            
+            # Update session headers
+            client.session.headers.update(headers)
+            
+            # Use session.head for HEAD request
+            response = client.session.head(
+                f"{client.base_url}/api/blobs/sha256:{sha256}",
+                timeout=client.timeout
+            )
+            return response.status_code == 200
         except Exception as e:
+            logger.warning(f"Error checking if GGUF exists: {e}")
             return False
 
     def upload_gguf(self, gguf_path:str, sha256:str):
         if not self.process:
             self.start()
-        with open(gguf_path, 'rb') as f:
-            requests.post(
-                '{}/api/blobs/sha256:{}'.format(self.properties.get('url'), sha256),
-                data=f,
-                headers={
-                    'Authorization': 'Bearer {}'.format(self.properties.get('api'))
-                }
+        try:
+            client = self.get_network_client()
+            
+            # Prepare headers
+            headers = {}
+            if self.properties.get('api'):
+                headers['Authorization'] = 'Bearer {}'.format(self.properties.get('api'))
+            
+            # Update session headers
+            client.session.headers.update(headers)
+            
+            # Upload file with NetworkClient
+            with open(gguf_path, 'rb') as f:
+                client.post(f'api/blobs/sha256:{sha256}', data=f, stream=False)
+        except NetworkError as e:
+            ErrorHandler.log_error(
+                message=f"Network error uploading GGUF file",
+                exception=e,
+                context={'gguf_path': gguf_path, 'sha256': sha256}
             )
+            raise
+        except Exception as e:
+            logger.error(f"Error uploading GGUF: {e}")
+            raise
 
     def create_model(self, data:dict, model):
         if not self.process:
             self.start()
         try:
-            response = requests.post(
-                '{}/api/create'.format(self.properties.get('url')),
-                headers={
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer {}'.format(self.properties.get('api'))
-                },
-                data=json.dumps(data),
-                stream=True
-            )
+            client = self.get_network_client()
+            
+            # Prepare headers
+            headers = {
+                'Content-Type': 'application/json'
+            }
+            if self.properties.get('api'):
+                headers['Authorization'] = 'Bearer {}'.format(self.properties.get('api'))
+            
+            # Update session headers
+            client.session.headers.update(headers)
+            
+            # Make streaming request with NetworkClient
+            response = client.post('api/create', json=data, stream=True)
             if response.status_code == 200:
                 for line in response.iter_lines():
                     if line:
@@ -442,6 +550,14 @@ class BaseInstance:
                         if data.get('status') == 'success':
                             model.update_progressbar(-1)
                             return
+        except NetworkError as e:
+            # Handle network errors during model creation
+            ErrorHandler.log_error(
+                message=f"Network error creating model",
+                exception=e,
+                context={'model': model}
+            )
+            model.get_parent().get_parent().remove(model.get_parent())
         except Exception as e:
             model.get_parent().get_parent().remove(model.get_parent())
             logger.error(e)
@@ -450,18 +566,34 @@ class BaseInstance:
         if not self.process:
             self.start()
         try:
-            response = requests.delete(
-                '{}/api/delete'.format(self.properties.get('url')),
-                headers={
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer {}'.format(self.properties.get('api'))
-                },
-                data=json.dumps({
-                    "name": model_name
-                })
+            client = self.get_network_client()
+            
+            # Prepare headers
+            headers = {
+                'Content-Type': 'application/json'
+            }
+            if self.properties.get('api'):
+                headers['Authorization'] = 'Bearer {}'.format(self.properties.get('api'))
+            
+            # Update session headers
+            client.session.headers.update(headers)
+            
+            # Use session.delete for DELETE request
+            response = client.session.delete(
+                f"{client.base_url}/api/delete",
+                json={"name": model_name},
+                timeout=client.timeout
             )
             return response.status_code == 200
+        except NetworkError as e:
+            ErrorHandler.log_error(
+                message=f"Network error deleting model {model_name}",
+                exception=e,
+                context={'model_name': model_name}
+            )
+            return False
         except Exception as e:
+            logger.error(f"Error deleting model: {e}")
             return False
 
 
@@ -534,18 +666,20 @@ class OllamaManaged(BaseInstance):
         AMD_support_label = "\n<a href='https://github.com/Jeffser/Alpaca/wiki/Installing-Ollama'>{}</a>".format(_('Alpaca Support'))
         with pipe:
             try:
-                for line in iter(pipe.readline, ''):
-                    self.log_raw += line
-                    print(line, end='')
-                    if 'msg="model request too large for system"' in line and self.row:
+                for line in iter(pipe.readline, b''):
+                    # Decode bytes to string
+                    line_str = line.decode('utf-8', errors='replace') if isinstance(line, bytes) else line
+                    self.log_raw += line_str
+                    print(line_str, end='')
+                    if 'msg="model request too large for system"' in line_str and self.row:
                         dialog.show_toast(_("Model request too large for system"), self.row.get_root())
-                    elif 'msg="amdgpu detected, but no compatible rocm library found.' in line:
+                    elif 'msg="amdgpu detected, but no compatible rocm library found.' in line_str:
                         if bool(os.getenv("FLATPAK_ID")):
                             self.log_summary = (_("AMD GPU detected but the extension is missing, Ollama will use CPU.") + AMD_support_label, ['dim-label', 'error'])
                         else:
                             self.log_summary = (_("AMD GPU detected but ROCm is missing, Ollama will use CPU.") + AMD_support_label, ['dim-label', 'error'])
-                    elif 'msg="amdgpu is supported"' in line:
-                        self.log_summary = (_("Using AMD GPU type '{}'").format(line.split('=')[-1].replace('\n', '')), ['dim-label', 'success'])
+                    elif 'msg="amdgpu is supported"' in line_str:
+                        self.log_summary = (_("Using AMD GPU type '{}'").format(line_str.split('=')[-1].replace('\n', '')), ['dim-label', 'success'])
             except Exception as e:
                 ErrorHandler.log_error(
                     message="Error reading Ollama process output",
@@ -749,12 +883,18 @@ class OllamaCloud(BaseInstance):
         if not self.process:
             self.start()
         try:
-            response = requests.get(
-                '{}/api/tags'.format(self.properties.get('url')),
-                headers={
-                    'Authorization': 'Bearer {}'.format(self.properties.get('api'))
-                }
-            )
+            client = self.get_network_client()
+            
+            # Prepare headers
+            headers = {}
+            if self.properties.get('api'):
+                headers['Authorization'] = 'Bearer {}'.format(self.properties.get('api'))
+            
+            # Update session headers
+            client.session.headers.update(headers)
+            
+            # Make request with NetworkClient
+            response = client.get('api/tags')
             if response.status_code == 200:
                 available_models = {}
 
@@ -784,6 +924,17 @@ class OllamaCloud(BaseInstance):
                     available_models[model_name]['tags'].append([model_tag, 'cloud'])
 
                 return available_models
+        except NetworkError as e:
+            # Handle network-specific errors
+            ErrorHandler.handle_exception(
+                exception=e,
+                context="OllamaCloud.get_available_models",
+                user_message=_("Could not retrieve models. Please check your connection."),
+                show_dialog=True,
+                parent_widget=self.row.get_root() if self.row else None
+            )
+            if self.row:
+                self.row.get_parent().unselect_all()
         except Exception as e:
             dialog.simple_error(
                 parent = self.row.get_root() if self.row else None,

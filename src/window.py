@@ -31,6 +31,10 @@ from gi.repository import Adw, Gtk, Gdk, GLib, GtkSource, Gio, Spelling
 from .sql_manager import generate_uuid, generate_numbered_name, prettify_model_name, Instance as SQL
 from . import widgets as Widgets
 from .constants import data_dir, source_dir, cache_dir
+from .services.chat_service import ChatService
+from .services.message_service import MessageService
+from .services.instance_service import InstanceService
+from .core.error_handler import ErrorHandler, AlpacaError
 
 logger = logging.getLogger(__name__)
 
@@ -173,20 +177,29 @@ class AlpacaWindow(Adw.ApplicationWindow):
             try:
                 self.settings.set_string('default-chat', self.chat_bin.get_child().chat_id)
             except Exception as e:
-                logger.warning(f"Could not save default chat: {e}")
+                ErrorHandler.log_error(
+                    message="Could not save default chat",
+                    exception=e
+                )
             
             try:
                 current_instance = self.get_current_instance()
                 if hasattr(current_instance, 'stop'):
                     current_instance.stop()
             except Exception as e:
-                logger.warning(f"Error stopping current instance: {e}")
+                ErrorHandler.log_error(
+                    message="Error stopping current instance",
+                    exception=e
+                )
             
             try:
                 if Widgets.voice.message_dictated:
                     Widgets.voice.message_dictated.popup.tts_button.set_active(False)
             except Exception as e:
-                logger.warning(f"Error stopping voice: {e}")
+                ErrorHandler.log_error(
+                    message="Error stopping voice",
+                    exception=e
+                )
             
             # Quit from the GLib main loop to avoid teardown races with worker threads
             GLib.idle_add(self.get_application().quit)
@@ -324,19 +337,81 @@ class AlpacaWindow(Adw.ApplicationWindow):
         )
         current_chat.add_message(m_element)
 
-        for old_attachment in list(self.global_footer.attachment_container.container):
-            attachment = m_element.add_attachment(
-                file_id = generate_uuid(),
-                name = old_attachment.file_name,
-                attachment_type = old_attachment.file_type,
-                content = old_attachment.file_content
+        try:
+            # Handle attachments using MessageService
+            for old_attachment in list(self.global_footer.attachment_container.container):
+                attachment = m_element.add_attachment(
+                    file_id = generate_uuid(),
+                    name = old_attachment.file_name,
+                    attachment_type = old_attachment.file_type,
+                    content = old_attachment.file_content
+                )
+                old_attachment.delete()
+                
+                # Use MessageService to add attachment
+                try:
+                    self.message_service.add_attachment(
+                        message_id=m_element.message_id,
+                        file_type=attachment.file_type,
+                        file_name=attachment.file_name,
+                        file_content=attachment.file_content
+                    )
+                except AlpacaError as e:
+                    ErrorHandler.handle_exception(
+                        exception=e,
+                        context="send_message - add_attachment",
+                        user_message=e.user_message,
+                        show_dialog=False,
+                        parent_widget=self
+                    )
+                    # Fall back to direct SQL for compatibility
+                    SQL.insert_or_update_attachment(m_element, attachment)
+
+            m_element.block_container.set_content(raw_message)
+
+            # Use MessageService to create/update message
+            try:
+                message_role = ["user", "assistant", "system"][mode*2]
+                # Check if message exists
+                existing_message = self.message_service.get_message(m_element.message_id)
+                if existing_message:
+                    self.message_service.update_message(
+                        message_id=m_element.message_id,
+                        content=raw_message,
+                        model=m_element.get_model() or ""
+                    )
+                else:
+                    # Create new message - but we need to handle the fact that the message
+                    # was already created with a specific ID, so we'll fall back to SQL
+                    SQL.insert_or_update_message(m_element)
+            except AlpacaError as e:
+                ErrorHandler.handle_exception(
+                    exception=e,
+                    context="send_message - save_message",
+                    user_message=e.user_message,
+                    show_dialog=False,
+                    parent_widget=self
+                )
+                # Fall back to direct SQL for compatibility
+                SQL.insert_or_update_message(m_element)
+            except Exception as e:
+                ErrorHandler.log_error(
+                    message="Failed to save message",
+                    exception=e,
+                    context={'message_id': m_element.message_id}
+                )
+                # Fall back to direct SQL for compatibility
+                SQL.insert_or_update_message(m_element)
+
+        except Exception as e:
+            ErrorHandler.handle_exception(
+                exception=e,
+                context="send_message",
+                user_message=_("Failed to send message. Please try again."),
+                show_dialog=True,
+                parent_widget=self
             )
-            old_attachment.delete()
-            SQL.insert_or_update_attachment(m_element, attachment)
-
-        m_element.block_container.set_content(raw_message)
-
-        SQL.insert_or_update_message(m_element)
+            return
 
         buffer.set_text("", 0)
 
@@ -348,7 +423,19 @@ class AlpacaWindow(Adw.ApplicationWindow):
                 author=current_model
             )
             current_chat.add_message(m_element_bot)
-            SQL.insert_or_update_message(m_element_bot)
+            
+            try:
+                # Save bot message using SQL (for now, as it's created with specific ID)
+                SQL.insert_or_update_message(m_element_bot)
+            except Exception as e:
+                ErrorHandler.handle_exception(
+                    exception=e,
+                    context="send_message - save_bot_message",
+                    user_message=_("Failed to save assistant message."),
+                    show_dialog=False,
+                    parent_widget=self
+                )
+            
             if len(available_tools) > 0:
                 threading.Thread(target=self.get_current_instance().use_tools, args=(m_element_bot, current_model, available_tools, True), daemon=True).start()
             else:
@@ -381,15 +468,29 @@ class AlpacaWindow(Adw.ApplicationWindow):
             self.get_chat_list_page().new_chat(self.get_application().args.new_chat)
 
         # Ollama is available but there are no instances added
-        if not any(i.get("type") == "ollama:managed" for i in SQL.get_instances()) and shutil.which("ollama"):
-            SQL.insert_or_update_instance(
-                instance_id=generate_uuid(),
-                pinned=True,
-                instance_type='ollama:managed',
-                properties={
-                    'name': 'Alpaca',
-                    'url': 'http://127.0.0.1:11435',
-                }
+        try:
+            # Check if there are any ollama:managed instances
+            all_instances = SQL.get_instances()  # Still using SQL for now as InstanceService doesn't have exact same API
+            has_managed_ollama = any(i.get("type") == "ollama:managed" for i in all_instances)
+            
+            if not has_managed_ollama and shutil.which("ollama"):
+                # Use SQL for now as the instance creation needs to match the existing structure
+                SQL.insert_or_update_instance(
+                    instance_id=generate_uuid(),
+                    pinned=True,
+                    instance_type='ollama:managed',
+                    properties={
+                        'name': 'Alpaca',
+                        'url': 'http://127.0.0.1:11435',
+                    }
+                )
+        except Exception as e:
+            ErrorHandler.handle_exception(
+                exception=e,
+                context="prepare_alpaca - create_default_instance",
+                user_message=_("Failed to create default Ollama instance."),
+                show_dialog=False,
+                parent_widget=self
             )
 
         Widgets.instances.update_instance_list(
@@ -399,17 +500,28 @@ class AlpacaWindow(Adw.ApplicationWindow):
 
     def on_chat_imported(self, file):
         if file:
-            if os.path.isfile(os.path.join(cache_dir, 'import.db')):
-                os.remove(os.path.join(cache_dir, 'import.db'))
-            file.copy(Gio.File.new_for_path(os.path.join(cache_dir, 'import.db')), Gio.FileCopyFlags.OVERWRITE, None, None, None, None)
-            chat_names = [tab.chat.get_name() for tab in list(self.get_chat_list_page().chat_list_box)]
-            for chat in SQL.import_chat(os.path.join(cache_dir, 'import.db'), chat_names, self.get_chat_list_page().folder_id):
-                self.get_chat_list_page().add_chat(
-                    chat_name=chat[1],
-                    chat_id=chat[0],
-                    mode=1
+            try:
+                if os.path.isfile(os.path.join(cache_dir, 'import.db')):
+                    os.remove(os.path.join(cache_dir, 'import.db'))
+                file.copy(Gio.File.new_for_path(os.path.join(cache_dir, 'import.db')), Gio.FileCopyFlags.OVERWRITE, None, None, None, None)
+                chat_names = [tab.chat.get_name() for tab in list(self.get_chat_list_page().chat_list_box)]
+                
+                # Still using SQL.import_chat as it's a complex operation that needs refactoring in task 17
+                for chat in SQL.import_chat(os.path.join(cache_dir, 'import.db'), chat_names, self.get_chat_list_page().folder_id):
+                    self.get_chat_list_page().add_chat(
+                        chat_name=chat[1],
+                        chat_id=chat[0],
+                        mode=1
+                    )
+                Widgets.dialog.show_toast(_("Chat imported successfully"), self)
+            except Exception as e:
+                ErrorHandler.handle_exception(
+                    exception=e,
+                    context="on_chat_imported",
+                    user_message=_("Failed to import chat. Please check the file format."),
+                    show_dialog=True,
+                    parent_widget=self
                 )
-            Widgets.dialog.show_toast(_("Chat imported successfully"), self)
 
     def toggle_searchbar(self):
         current_tag = self.main_navigation_view.get_visible_page_tag()
@@ -433,6 +545,12 @@ class AlpacaWindow(Adw.ApplicationWindow):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        
+        # Initialize service layer
+        self.chat_service = ChatService()
+        self.message_service = MessageService()
+        self.instance_service = InstanceService()
+        
         self.activities_page.set_child(Widgets.activities.ActivityManager())
 
         actions = [[{

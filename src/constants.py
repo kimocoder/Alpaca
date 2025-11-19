@@ -237,6 +237,13 @@ SAMPLE_PROMPTS = [
     "Prove Euler's identity"
 ]
 
+# Fallback for gettext when not in GTK context (e.g., tests)
+try:
+    _
+except NameError:
+    def _(s):
+        return s
+
 MODEL_CATEGORIES_METADATA = {
     'multilingual': {'name': _('Multilingual'), 'css': ['accent'], 'icon': 'language-symbolic'},
     'code': {'name': _('Code'), 'css': ['accent'], 'icon': 'code-symbolic'},

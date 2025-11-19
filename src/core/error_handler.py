@@ -173,24 +173,42 @@ class ErrorHandler:
             User-friendly error message
         """
         if isinstance(exception, AlpacaError):
-            return exception.user_message or exception.message
+            # If user_message is provided, use it
+            if exception.user_message:
+                return exception.user_message
+            
+            # Otherwise, generate a user-friendly message based on category
+            category_messages = {
+                ErrorCategory.NETWORK: 'Unable to connect to the service. Please check your network connection and try again.',
+                ErrorCategory.DATABASE: 'A database error occurred. Please try again or contact support if the problem persists.',
+                ErrorCategory.PROCESS: 'A process error occurred. Please restart the application and try again.',
+                ErrorCategory.FILESYSTEM: 'A file system error occurred. Please check file permissions and available disk space.',
+                ErrorCategory.VALIDATION: 'Invalid input provided. Please check your data and try again.',
+                ErrorCategory.RESOURCE: 'A resource error occurred. Please check system resources and try again.',
+                ErrorCategory.UNKNOWN: 'An unexpected error occurred. Please try again or contact support if the problem persists.'
+            }
+            
+            return category_messages.get(
+                exception.category,
+                'An unexpected error occurred. Please try again or contact support if the problem persists.'
+            )
 
         # Map common exception types to user-friendly messages
         exception_type = type(exception).__name__
 
         user_messages = {
-            'ConnectionError': 'Unable to connect to the service. Please check your network connection.',
+            'ConnectionError': 'Unable to connect to the service. Please check your network connection and try again.',
             'TimeoutError': 'The operation took too long to complete. Please try again.',
-            'FileNotFoundError': 'The requested file could not be found.',
-            'PermissionError': 'Permission denied. Please check file permissions.',
-            'ValueError': 'Invalid input provided. Please check your data.',
-            'KeyError': 'Required information is missing.',
-            'sqlite3.OperationalError': 'Database operation failed. Please try again.',
+            'FileNotFoundError': 'The requested file could not be found. Please verify the file path.',
+            'PermissionError': 'Permission denied. Please check file permissions and ensure you have the necessary access rights.',
+            'ValueError': 'Invalid input provided. Please check your data and try again.',
+            'KeyError': 'Required information is missing. Please ensure all required fields are provided.',
+            'sqlite3.OperationalError': 'Database operation failed. Please try again or contact support if the problem persists.',
         }
 
         return user_messages.get(
             exception_type,
-            f'An unexpected error occurred: {exception_type}'
+            'An unexpected error occurred. Please try again or contact support if the problem persists.'
         )
 
     @classmethod

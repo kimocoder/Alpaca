@@ -13,6 +13,7 @@ import os
 import shutil
 import json
 import sys
+import warnings
 
 from . import widgets as Widgets
 from .constants import data_dir
@@ -158,6 +159,12 @@ class Instance:
     """
 
     def initialize():
+        """
+        Initialize the database schema and apply migrations.
+        
+        This method creates all necessary tables if they don't exist and applies
+        any pending database migrations.
+        """
         if os.path.exists(os.path.join(data_dir, "chats_test.db")) and not os.path.exists(os.path.join(data_dir, "alpaca.db")):
             shutil.move(os.path.join(data_dir, "chats_test.db"), os.path.join(data_dir, "alpaca.db"))
 
@@ -289,6 +296,13 @@ class Instance:
             # Remove tool_parameters table
             if c.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' and name='tool_parameters';").fetchall() != []:
                 c.cursor.execute("DROP TABLE tool_parameters")
+        
+        # Apply database migrations
+        try:
+            from .repositories.migrations import apply_migrations
+            apply_migrations()
+        except Exception as e:
+            print(f"Warning: Failed to apply migrations: {e}")
 
 
     ###########
@@ -689,6 +703,13 @@ class Instance:
     ###############
     ## Instances ##
     ###############
+    
+    @staticmethod
+    def _get_instance_repository():
+        """Get instance repository with default database path."""
+        from .repositories.instance_repository import InstanceRepository
+        # Pass None to use default database path
+        return InstanceRepository(db_path=None)
 
     def get_instances_DEPRECATED() -> list:
         columns = [
@@ -733,90 +754,107 @@ class Instance:
         return instances
 
     def get_instances() -> list:
-        with SQLiteConnection() as c:
-            result = c.cursor.execute("SELECT * FROM instance").fetchall()
-            instances = []
-            for row in result:
-                instances.append({
-                    'id': row[0],
-                    'pinned': row[1] == 1,
-                    'type': row[2],
-                    'properties': json.loads(row[3])
-                })
-            return instances
-        return []
+        """
+        Get all instances from the database.
+        
+        DEPRECATED: Use InstanceRepository.get_all() instead.
+        This method is maintained for backward compatibility.
+        """
+        warnings.warn(
+            "Instance.get_instances() is deprecated. Use InstanceRepository.get_all() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        repo = Instance._get_instance_repository()
+        return repo.get_all()
 
     def insert_or_update_instance(instance_id:str, pinned:bool, instance_type:str, properties:dict):
-        with SQLiteConnection() as c:
-            if c.cursor.execute(
-                "SELECT id FROM instance WHERE id=?", (instance_id,)
-            ).fetchone():
-                c.cursor.execute(
-                    f"UPDATE instance SET properties=? WHERE id=?",
-                    (json.dumps(properties), instance_id)
-                )
-            else:
-                c.cursor.execute(
-                    f"INSERT INTO instance (id, pinned, type, properties) VALUES (?, ?, ?, ?)",
-                    (instance_id, 1 if pinned else 0, instance_type, json.dumps(properties))
-                )
+        """
+        Insert or update an instance in the database.
+        
+        DEPRECATED: Use InstanceRepository.create() or InstanceRepository.update() instead.
+        This method is maintained for backward compatibility.
+        """
+        warnings.warn(
+            "Instance.insert_or_update_instance() is deprecated. Use InstanceRepository.create() or InstanceRepository.update() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        repo = Instance._get_instance_repository()
+        
+        if repo.exists(instance_id):
+            repo.update(instance_id, {'properties': properties})
+        else:
+            repo.create({
+                'id': instance_id,
+                'pinned': pinned,
+                'type': instance_type,
+                'properties': properties
+            })
 
     def delete_instance(instance_id: str):
-        with SQLiteConnection() as c:
-            c.cursor.execute(
-                "DELETE FROM instance WHERE id=?", (instance_id,)
-            )
+        """
+        Delete an instance from the database.
+        
+        DEPRECATED: Use InstanceRepository.delete() instead.
+        This method is maintained for backward compatibility.
+        """
+        warnings.warn(
+            "Instance.delete_instance() is deprecated. Use InstanceRepository.delete() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        repo = Instance._get_instance_repository()
+        repo.delete(instance_id)
 
     ################################
     ## ONLINE INSTANCE MODEL LIST ##
     ################################
 
     def get_online_instance_model_list(instance_id:str) -> list:
-        with SQLiteConnection() as c:
-            result = c.cursor.execute(
-                "SELECT list FROM online_instance_model_list WHERE id=?",
-                (instance_id,)
-            ).fetchone()
-
-            if result:
-                return json.loads(result[0])
-        return []
+        """
+        Get the model list for an online instance.
+        
+        DEPRECATED: Use InstanceRepository.get_model_list() instead.
+        This method is maintained for backward compatibility.
+        """
+        warnings.warn(
+            "Instance.get_online_instance_model_list() is deprecated. Use InstanceRepository.get_model_list() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        repo = Instance._get_instance_repository()
+        return repo.get_model_list(instance_id)
 
     def append_online_instance_model_list(instance_id:str, model_name:str) -> None:
-        with SQLiteConnection() as c:
-            result = c.cursor.execute(
-                "SELECT list FROM online_instance_model_list WHERE id=?",
-                (instance_id,)
-            ).fetchone()
-
-            if result:
-                model_list = json.loads(result[0])
-                model_list.append(model_name)
-                c.cursor.execute(
-                    f"UPDATE online_instance_model_list SET list=? WHERE id=?",
-                    (json.dumps(model_list), instance_id)
-                )
-            else:
-                c.cursor.execute(
-                    "INSERT INTO online_instance_model_list (id, list) VALUES (?, ?)",
-                    (instance_id, json.dumps([model_name]))
-                )
+        """
+        Add a model to an instance's model list.
+        
+        DEPRECATED: Use InstanceRepository.add_model_to_list() instead.
+        This method is maintained for backward compatibility.
+        """
+        warnings.warn(
+            "Instance.append_online_instance_model_list() is deprecated. Use InstanceRepository.add_model_to_list() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        repo = Instance._get_instance_repository()
+        repo.add_model_to_list(instance_id, model_name)
 
     def remove_online_instance_model_list(instance_id:str, model_name:str) -> None:
-        with SQLiteConnection() as c:
-            result = c.cursor.execute(
-                "SELECT list FROM online_instance_model_list WHERE id=?",
-                (instance_id,)
-            ).fetchone()
-
-            if result:
-                model_list = json.loads(result[0])
-                if model_name in model_list:
-                    model_list.remove(model_name)
-                c.cursor.execute(
-                    f"UPDATE online_instance_model_list SET list=? WHERE id=?",
-                    (json.dumps(model_list), instance_id)
-                )
+        """
+        Remove a model from an instance's model list.
+        
+        DEPRECATED: Use InstanceRepository.remove_model_from_list() instead.
+        This method is maintained for backward compatibility.
+        """
+        warnings.warn(
+            "Instance.remove_online_instance_model_list() is deprecated. Use InstanceRepository.remove_model_from_list() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        repo = Instance._get_instance_repository()
+        repo.remove_model_from_list(instance_id, model_name)
 
     ##################
     ## CHAT FOLDERS ##

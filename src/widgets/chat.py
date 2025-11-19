@@ -361,6 +361,7 @@ class Chat(Gtk.Stack):
         self.folder_id = folder_id
         self.is_template = is_template
         self.row = ChatRow(self)
+        self._message_list_model = None  # Will be initialized when needed
         self.connect('realize', lambda *_: threading.Thread(target=self.update_prompts, daemon=True).start())
 
     def stop_message(self):
@@ -368,9 +369,15 @@ class Chat(Gtk.Stack):
         self.get_root().global_footer.toggle_action_button(True)
 
     def unload_messages(self):
+        """Unload messages from UI and free memory."""
         for widget in list(self.container):
             GLib.idle_add(widget.unparent)
             GLib.idle_add(widget.unrealize)
+        
+        # Unload from message list model if it exists
+        if hasattr(self, '_message_list_model') and self._message_list_model:
+            self._message_list_model.unload_all()
+        
         self.set_visible_child_name('loading')
 
     def add_message(self, message):
@@ -378,6 +385,7 @@ class Chat(Gtk.Stack):
         GLib.idle_add(self.set_visible_child_name, 'content')
 
     def load_messages(self):
+        """Load messages from database and display them."""
         messages = SQL.get_messages(self)
         for message in messages:
             message_element = Message(
@@ -400,6 +408,38 @@ class Chat(Gtk.Stack):
                 )
             GLib.idle_add(message_element.block_container.set_content, message[4])
         GLib.idle_add(self.set_visible_child_name, 'content' if len(messages) > 0 else 'welcome-screen')
+    
+    def get_message_count(self) -> int:
+        """
+        Get the total number of messages in this chat.
+        
+        Returns:
+            Number of messages
+        """
+        return len(list(self.container))
+    
+    def init_message_list_model(self, message_service, batch_size: int = 50):
+        """
+        Initialize the message list model for virtual scrolling.
+        
+        This enables efficient loading of large chat histories by loading
+        messages in batches on-demand.
+        
+        Args:
+            message_service: MessageService instance for loading messages
+            batch_size: Number of messages to load per batch (default: 50)
+        """
+        try:
+            from .message_list_model import MessageListModel
+            self._message_list_model = MessageListModel(
+                self.chat_id,
+                message_service,
+                batch_size
+            )
+            logger.debug(f"Initialized MessageListModel for chat {self.chat_id}")
+        except Exception as e:
+            logger.error(f"Failed to initialize MessageListModel: {e}")
+            self._message_list_model = None
 
     def convert_to_ollama(self) -> list:
         messages = []
@@ -857,56 +897,124 @@ class ChatRow(Gtk.ListBoxRow):
 
     def export_md(self, obsidian:bool):
         logger.info("Exporting chat (MD)")
-        markdown = []
-        for message_element in list(self.chat.container):
-            if message_element.get_content() and message_element.dt:
-                message_author = _('User')
-                if message_element.get_model():
-                    message_author = prettify_model_name(message_element.get_model())
-                if message_element.mode == 2:
-                    message_author = _('System')
-
-                markdown.append('### **{}** | {}'.format(message_author, message_element.dt.strftime("%Y/%m/%d %H:%M:%S")))
-                markdown.append(message_element.get_content())
-                for file in message_element.image_attachment_container.get_content():
-                    markdown.append('![🖼️ {}](data:image/{};base64,{})'.format(file.get('name'), file.get('name').split('.')[1], file.get('content')))
-                emojis = {
-                    'plain_text': '📃',
-                    'code': '💻',
-                    'pdf': '📕',
-                    'youtube': '📹',
-                    'website': '🌐',
-                    'thought': '🧠'
-                }
-                for file in message_element.attachment_container.get_content():
-                    if obsidian:
-                        file_block = "> [!quote]- {}\n".format(file.get('name'))
-                        for line in file.get('content').split("\n"):
-                            file_block += "> {}\n".format(line)
-                        markdown.append(file_block)
-                    else:
-                        markdown.append('<details>\n\n<summary>{} {}</summary>\n\n```TXT\n{}\n```\n\n</details>'.format(emojis.get(file.get('type'), '📃'), file.get('name'), file.get('content')))
-                markdown.append('----')
-        markdown.append('Generated from [Alpaca](https://github.com/Jeffser/Alpaca)')
-        with open(os.path.join(cache_dir, 'export.md'), 'w') as f:
-            f.write('\n\n'.join(markdown))
-        file_dialog = Gtk.FileDialog(initial_name=f"{self.get_name()}.md")
-        file_dialog.save(parent=self.get_root(), cancellable=None, callback=lambda file_dialog, result, temp_path=os.path.join(cache_dir, 'export.md'): self.on_export_chat(file_dialog, result, temp_path))
+        
+        # Progress tracking
+        last_progress = [0]  # Use list to allow modification in nested function
+        
+        def progress_callback(progress: int):
+            """Show progress updates via toast notifications."""
+            # Only show progress at significant milestones to avoid spam
+            if progress - last_progress[0] >= 20 or progress == 100:
+                GLib.idle_add(
+                    dialog.show_toast,
+                    _("Exporting chat: {}%").format(progress),
+                    self.get_root()
+                )
+                last_progress[0] = progress
+        
+        try:
+            # Use ChatService for export with progress reporting
+            from services.chat_service import ChatService
+            chat_service = ChatService()
+            
+            temp_path = os.path.join(cache_dir, 'export.md')
+            chat_service.export_chat(
+                chat_id=self.chat.chat_id,
+                format='md',
+                output_path=temp_path,
+                progress_callback=progress_callback
+            )
+            
+            file_dialog = Gtk.FileDialog(initial_name=f"{self.get_name()}.md")
+            file_dialog.save(
+                parent=self.get_root(),
+                cancellable=None,
+                callback=lambda file_dialog, result, temp_path=temp_path: self.on_export_chat(file_dialog, result, temp_path)
+            )
+        except Exception as e:
+            logger.error(f"Failed to export chat: {e}")
+            dialog.show_toast(_("Failed to export chat"), self.get_root())
 
     def export_db(self):
         logger.info("Exporting chat (DB)")
-        if os.path.isfile(os.path.join(cache_dir, 'export.db')):
-            os.remove(os.path.join(cache_dir, 'export.db'))
-        SQL.export_db(self.chat, os.path.join(cache_dir, 'export.db'))
-        file_dialog = Gtk.FileDialog(initial_name=f"{self.get_name()}.db")
-        file_dialog.save(parent=self.get_root(), cancellable=None, callback=lambda file_dialog, result, temp_path=os.path.join(cache_dir, 'export.db'): self.on_export_chat(file_dialog, result, temp_path))
+        
+        # Progress tracking
+        last_progress = [0]
+        
+        def progress_callback(progress: int):
+            """Show progress updates via toast notifications."""
+            if progress - last_progress[0] >= 20 or progress == 100:
+                GLib.idle_add(
+                    dialog.show_toast,
+                    _("Exporting chat: {}%").format(progress),
+                    self.get_root()
+                )
+                last_progress[0] = progress
+        
+        try:
+            # Use ChatService for export with progress reporting
+            from services.chat_service import ChatService
+            chat_service = ChatService()
+            
+            temp_path = os.path.join(cache_dir, 'export.db')
+            if os.path.isfile(temp_path):
+                os.remove(temp_path)
+            
+            chat_service.export_chat(
+                chat_id=self.chat.chat_id,
+                format='db',
+                output_path=temp_path,
+                progress_callback=progress_callback
+            )
+            
+            file_dialog = Gtk.FileDialog(initial_name=f"{self.get_name()}.db")
+            file_dialog.save(
+                parent=self.get_root(),
+                cancellable=None,
+                callback=lambda file_dialog, result, temp_path=temp_path: self.on_export_chat(file_dialog, result, temp_path)
+            )
+        except Exception as e:
+            logger.error(f"Failed to export chat: {e}")
+            dialog.show_toast(_("Failed to export chat"), self.get_root())
 
     def export_json(self, include_metadata:bool):
         logger.info("Exporting chat (JSON)")
-        with open(os.path.join(cache_dir, 'export.json'), 'w') as f:
-            f.write(json.dumps({self.get_name() if include_metadata else 'messages': self.chat.convert_to_json(include_metadata)}, indent=4))
-        file_dialog = Gtk.FileDialog(initial_name=f"{self.get_name()}.json")
-        file_dialog.save(parent=self.get_root(), cancellable=None, callback=lambda file_dialog, result, temp_path=os.path.join(cache_dir, 'export.json'): self.on_export_chat(file_dialog, result, temp_path))
+        
+        # Progress tracking
+        last_progress = [0]
+        
+        def progress_callback(progress: int):
+            """Show progress updates via toast notifications."""
+            if progress - last_progress[0] >= 20 or progress == 100:
+                GLib.idle_add(
+                    dialog.show_toast,
+                    _("Exporting chat: {}%").format(progress),
+                    self.get_root()
+                )
+                last_progress[0] = progress
+        
+        try:
+            # Use ChatService for export with progress reporting
+            from services.chat_service import ChatService
+            chat_service = ChatService()
+            
+            temp_path = os.path.join(cache_dir, 'export.json')
+            chat_service.export_chat(
+                chat_id=self.chat.chat_id,
+                format='json',
+                output_path=temp_path,
+                progress_callback=progress_callback
+            )
+            
+            file_dialog = Gtk.FileDialog(initial_name=f"{self.get_name()}.json")
+            file_dialog.save(
+                parent=self.get_root(),
+                cancellable=None,
+                callback=lambda file_dialog, result, temp_path=temp_path: self.on_export_chat(file_dialog, result, temp_path)
+            )
+        except Exception as e:
+            logger.error(f"Failed to export chat: {e}")
+            dialog.show_toast(_("Failed to export chat"), self.get_root())
 
     def prompt_export(self):
         options = {
