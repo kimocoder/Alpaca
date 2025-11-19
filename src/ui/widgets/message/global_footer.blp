@@ -1,0 +1,60 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $AlpacaGlobalFooter: Gtk.Box {
+  spacing: 10;
+  orientation: vertical;
+  styles [
+    "p10"
+  ]
+
+  $AlpacaAttachmentContainer attachment_container {}
+
+  Gtk.Box message_text_view_container {
+    overflow: hidden;
+    styles [
+      "card"
+    ]
+
+    Gtk.ScrolledWindow {
+      max-content-height: 150;
+      propagate-natural-height: true;
+      min-content-height: 1;
+      styles [
+        "undershoot-bottom"
+      ]
+      child: $AlpacaGlobalMessageTextView message_text_view {};
+    }
+
+    $AlpacaGlobalActionStack action_stack {
+      sensitive: false;
+    }
+  }
+
+  Adw.WrapBox {
+    child-spacing: 10;
+    line-spacing: 10;
+    justify-last-line: true;
+
+    $AlpacaGlobalAttachmentButton attachment_button {}
+
+    $AlpacaMicrophoneButton microphone_button {}
+
+    Gtk.Button model_manager_shortcut {
+      icon-name: "brain-augemnted-symbolic";
+      valign: center;
+      tooltip-text: _("Manage Models");
+      action-name: "app.model_manager";
+      styles [
+        "circular"
+      ]
+    }
+
+    $AlpacaAddedModelSelector model_selector {
+      hexpand: true;
+      halign: start;
+    }
+
+    $AlpacaToolSelector tool_selector {}
+  }
+}
