@@ -209,6 +209,27 @@ class Instance:
                     "name": "TEXT NOT NULL",
                     "color": "TEXT",
                     "parent": "TEXT"
+                },
+                "model_pin": {
+                    "id": "TEXT NOT NULL PRIMARY KEY",
+                    "model_name": "TEXT NOT NULL",
+                    "instance_id": "TEXT NOT NULL",
+                    "pin_order": "INTEGER NOT NULL"
+                },
+                "statistics": {
+                    "id": "TEXT NOT NULL PRIMARY KEY",
+                    "event_type": "TEXT NOT NULL",
+                    "model": "TEXT",
+                    "tokens_used": "INTEGER",
+                    "response_time_ms": "INTEGER",
+                    "timestamp": "DATETIME NOT NULL"
+                },
+                "backup_schedule": {
+                    "id": "TEXT NOT NULL PRIMARY KEY",
+                    "interval_hours": "INTEGER NOT NULL",
+                    "backup_path": "TEXT NOT NULL",
+                    "last_backup": "DATETIME",
+                    "enabled": "INTEGER NOT NULL DEFAULT 1"
                 }
             }
 
@@ -892,3 +913,172 @@ class Instance:
 
         for row in result:
             Instance.remove_folder(row[0])
+
+    ###############
+    ## Model Pin ##
+    ###############
+
+    def add_model_pin(model_name: str, instance_id: str, pin_order: int = 0) -> str:
+        """Add or update a model pin."""
+        pin_id = generate_uuid()
+        with SQLiteConnection() as c:
+            # Check if pin already exists
+            existing = c.cursor.execute(
+                "SELECT id FROM model_pin WHERE model_name=? AND instance_id=?",
+                (model_name, instance_id)
+            ).fetchone()
+            
+            if existing:
+                c.cursor.execute(
+                    "UPDATE model_pin SET pin_order=? WHERE id=?",
+                    (pin_order, existing[0])
+                )
+                return existing[0]
+            
+            c.cursor.execute(
+                "INSERT INTO model_pin (id, model_name, instance_id, pin_order) VALUES (?, ?, ?, ?)",
+                (pin_id, model_name, instance_id, pin_order)
+            )
+        return pin_id
+    
+    def remove_model_pin(model_name: str, instance_id: str) -> bool:
+        """Remove a model pin."""
+        with SQLiteConnection() as c:
+            result = c.cursor.execute(
+                "SELECT id FROM model_pin WHERE model_name=? AND instance_id=?",
+                (model_name, instance_id)
+            ).fetchone()
+            
+            if not result:
+                return False
+            
+            c.cursor.execute(
+                "DELETE FROM model_pin WHERE model_name=? AND instance_id=?",
+                (model_name, instance_id)
+            )
+        return True
+    
+    def get_pinned_models(instance_id: str) -> list:
+        """Get all pinned models for an instance, ordered by pin_order."""
+        with SQLiteConnection() as c:
+            pins = c.cursor.execute(
+                "SELECT id, model_name, instance_id, pin_order FROM model_pin WHERE instance_id=? ORDER BY pin_order ASC",
+                (instance_id,)
+            ).fetchall()
+        return pins
+    
+    def is_model_pinned(model_name: str, instance_id: str) -> bool:
+        """Check if a model is pinned."""
+        with SQLiteConnection() as c:
+            result = c.cursor.execute(
+                "SELECT id FROM model_pin WHERE model_name=? AND instance_id=?",
+                (model_name, instance_id)
+            ).fetchone()
+        return result is not None
+
+    ################
+    ## Statistics ##
+    ################
+
+    def record_statistic(event_type: str, model: str = None, tokens_used: int = None, 
+                        response_time_ms: int = None) -> str:
+        """Record a usage statistic."""
+        stat_id = generate_uuid()
+        with SQLiteConnection() as c:
+            c.cursor.execute(
+                "INSERT INTO statistics (id, event_type, model, tokens_used, response_time_ms, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+                (stat_id, event_type, model, tokens_used, response_time_ms, 
+                 datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S"))
+            )
+        return stat_id
+    
+    def get_statistics(event_type: str = None, date_from: str = None, date_to: str = None) -> list:
+        """Get statistics with optional filtering."""
+        with SQLiteConnection() as c:
+            query = "SELECT id, event_type, model, tokens_used, response_time_ms, timestamp FROM statistics WHERE 1=1"
+            params = []
+            
+            if event_type:
+                query += " AND event_type=?"
+                params.append(event_type)
+            
+            if date_from:
+                query += " AND timestamp >= ?"
+                params.append(date_from)
+            
+            if date_to:
+                query += " AND timestamp <= ?"
+                params.append(date_to)
+            
+            query += " ORDER BY timestamp DESC"
+            
+            stats = c.cursor.execute(query, tuple(params)).fetchall()
+        return stats
+    
+    def get_token_usage_summary() -> dict:
+        """Get summary of token usage by model."""
+        with SQLiteConnection() as c:
+            results = c.cursor.execute(
+                "SELECT model, SUM(tokens_used) as total_tokens, COUNT(*) as count FROM statistics WHERE tokens_used IS NOT NULL GROUP BY model"
+            ).fetchall()
+        return {row[0]: {"total_tokens": row[1], "count": row[2]} for row in results}
+    
+    def get_response_time_summary() -> dict:
+        """Get summary of response times by model."""
+        with SQLiteConnection() as c:
+            results = c.cursor.execute(
+                "SELECT model, AVG(response_time_ms) as avg_time, MIN(response_time_ms) as min_time, MAX(response_time_ms) as max_time FROM statistics WHERE response_time_ms IS NOT NULL GROUP BY model"
+            ).fetchall()
+        return {row[0]: {"avg_time": row[1], "min_time": row[2], "max_time": row[3]} for row in results}
+
+    #####################
+    ## Backup Schedule ##
+    #####################
+
+    def set_backup_schedule(interval_hours: int, backup_path: str, enabled: bool = True) -> str:
+        """Set or update the backup schedule."""
+        schedule_id = generate_uuid()
+        with SQLiteConnection() as c:
+            # Remove any existing schedule (only one schedule allowed)
+            c.cursor.execute("DELETE FROM backup_schedule")
+            
+            c.cursor.execute(
+                "INSERT INTO backup_schedule (id, interval_hours, backup_path, enabled) VALUES (?, ?, ?, ?)",
+                (schedule_id, interval_hours, backup_path, 1 if enabled else 0)
+            )
+        return schedule_id
+    
+    def get_backup_schedule() -> dict:
+        """Get the current backup schedule."""
+        with SQLiteConnection() as c:
+            result = c.cursor.execute(
+                "SELECT id, interval_hours, backup_path, last_backup, enabled FROM backup_schedule LIMIT 1"
+            ).fetchone()
+        
+        if result:
+            return {
+                "id": result[0],
+                "interval_hours": result[1],
+                "backup_path": result[2],
+                "last_backup": result[3],
+                "enabled": bool(result[4])
+            }
+        return None
+    
+    def update_last_backup(timestamp: str = None) -> bool:
+        """Update the last backup timestamp."""
+        if timestamp is None:
+            timestamp = datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+        
+        with SQLiteConnection() as c:
+            result = c.cursor.execute(
+                "UPDATE backup_schedule SET last_backup=?",
+                (timestamp,)
+            )
+        return result.rowcount > 0
+    
+    def delete_backup_schedule() -> bool:
+        """Delete the backup schedule."""
+        with SQLiteConnection() as c:
+            c.cursor.execute("DELETE FROM backup_schedule")
+        return True
