@@ -19,6 +19,22 @@ from .constants import data_dir
 from gi.repository import Gio, GLib
 
 def format_datetime(dt:datetime.datetime) -> str:
+    """
+    Format a datetime object into a human-readable string.
+    
+    Formats the datetime based on how recent it is:
+    - Today: shows only time
+    - This year: shows month, day, and time
+    - Other years: shows full date and time
+    
+    Respects the ALPACA_USE_24H environment variable for 12/24 hour format.
+    
+    Args:
+        dt: The datetime object to format
+        
+    Returns:
+        A formatted datetime string
+    """
     date = GLib.DateTime.new(
         GLib.DateTime.new_now_local().get_timezone(),
         dt.year,
@@ -45,6 +61,15 @@ def format_datetime(dt:datetime.datetime) -> str:
         return date.format("%b %d %Y, %H:%M")
 
 def nanoseconds_to_timestamp(ns:int) -> str or None:
+    """
+    Convert nanoseconds to a human-readable timestamp string.
+    
+    Args:
+        ns: Time duration in nanoseconds
+        
+    Returns:
+        Formatted timestamp string (HH:MM:SS, MM:SS, or "X seconds"), or None if ns is falsy
+    """
     if ns:
         total_seconds = ns / 1_000_000_000
 
@@ -60,6 +85,17 @@ def nanoseconds_to_timestamp(ns:int) -> str or None:
             return _('{} seconds').format(seconds)
 
 def dict_to_metadata_string(data:dict) -> str:
+    """
+    Convert model response metadata dictionary to a formatted Markdown table string.
+    
+    Includes metrics like total duration, load duration, token counts, and evaluation rates.
+    
+    Args:
+        data: Dictionary containing model response metadata
+        
+    Returns:
+        Markdown-formatted table string with metrics and values
+    """
     metadata_parameters = {
         _('Total Duration'): nanoseconds_to_timestamp(data.get('total_duration')),
         _('Load Duration'): nanoseconds_to_timestamp(data.get('load_duration'))
@@ -79,6 +115,12 @@ def dict_to_metadata_string(data:dict) -> str:
     return '\n'.join(metadata_result)
 
 def generate_uuid() -> str:
+    """
+    Generate a unique identifier combining timestamp and UUID.
+    
+    Returns:
+        A unique string identifier in format: YYYYMMDDHHMMSSμμμμμμ + UUID hex
+    """
     return f"{datetime.datetime.today().strftime('%Y%m%d%H%M%S%f')}{uuid.uuid4().hex}"
 
 def generate_numbered_name(name: str, compare_list: "list[str]") -> str:
@@ -104,6 +146,19 @@ def generate_numbered_name(name: str, compare_list: "list[str]") -> str:
     return name
 
 def prettify_model_name(name:str, separated:bool=False) -> str or tuple:
+    """
+    Convert a model name to a human-readable format.
+    
+    Handles model names with tags (e.g., "llama2:13b") and formats them nicely.
+    Omits common tags like "latest" and "custom" from display.
+    
+    Args:
+        name: The model name to prettify
+        separated: If True, return tuple of (model_name, tag); if False, return formatted string
+        
+    Returns:
+        Either a formatted string or tuple of (model_name, tag) depending on separated parameter
+    """
     if name:
         if ':' in name:
             name = name.split(':')
@@ -158,6 +213,12 @@ class Instance:
     """
 
     def initialize():
+        """
+        Initialize the SQLite database with required tables and perform migrations.
+        
+        Creates all necessary tables if they don't exist, handles schema migrations
+        from older versions, and migrates legacy data structures to current format.
+        """
         if os.path.exists(os.path.join(data_dir, "chats_test.db")) and not os.path.exists(os.path.join(data_dir, "alpaca.db")):
             shutil.move(os.path.join(data_dir, "chats_test.db"), os.path.join(data_dir, "alpaca.db"))
 
@@ -209,6 +270,39 @@ class Instance:
                     "name": "TEXT NOT NULL",
                     "color": "TEXT",
                     "parent": "TEXT"
+                },
+                "prompt": {
+                    "id": "TEXT NOT NULL PRIMARY KEY",
+                    "name": "TEXT NOT NULL",
+                    "content": "TEXT NOT NULL",
+                    "category": "TEXT",
+                    "created_at": "DATETIME NOT NULL"
+                },
+                "bookmark": {
+                    "id": "TEXT NOT NULL PRIMARY KEY",
+                    "message_id": "TEXT NOT NULL",
+                    "created_at": "DATETIME NOT NULL"
+                },
+                "model_pin": {
+                    "id": "TEXT NOT NULL PRIMARY KEY",
+                    "model_name": "TEXT NOT NULL",
+                    "instance_id": "TEXT NOT NULL",
+                    "pin_order": "INTEGER NOT NULL"
+                },
+                "statistics": {
+                    "id": "TEXT NOT NULL PRIMARY KEY",
+                    "event_type": "TEXT NOT NULL",
+                    "model": "TEXT",
+                    "tokens_used": "INTEGER",
+                    "response_time_ms": "INTEGER",
+                    "timestamp": "DATETIME NOT NULL"
+                },
+                "backup_schedule": {
+                    "id": "TEXT NOT NULL PRIMARY KEY",
+                    "interval_hours": "INTEGER NOT NULL",
+                    "backup_path": "TEXT NOT NULL",
+                    "last_backup": "DATETIME",
+                    "enabled": "INTEGER NOT NULL DEFAULT 1"
                 }
             }
 
@@ -296,6 +390,15 @@ class Instance:
     ###########
 
     def get_chats_by_folder(folder_id:str=None) -> list:
+        """
+        Retrieve all chats in a specific folder, ordered by most recent message.
+        
+        Args:
+            folder_id: The folder ID to filter by, or None for root-level chats
+            
+        Returns:
+            List of tuples containing (chat_id, chat_name, is_template, latest_message_time)
+        """
         with SQLiteConnection() as c:
             if folder_id is None:
                 chats = c.cursor.execute(
@@ -316,6 +419,12 @@ class Instance:
         return chats
 
     def get_templates() -> list:
+        """
+        Retrieve all chat templates, ordered by most recent message.
+        
+        Returns:
+            List of tuples containing (chat_id, chat_name, latest_message_time)
+        """
         with SQLiteConnection() as c:
             templates = c.cursor.execute(
                 "SELECT chat.id, chat.name, MAX(message.date_time) AS \
@@ -326,6 +435,15 @@ class Instance:
         return templates
 
     def get_messages(chat) -> list:
+        """
+        Retrieve all messages for a specific chat.
+        
+        Args:
+            chat: The chat object containing chat_id
+            
+        Returns:
+            List of tuples containing (id, role, model, date_time, content)
+        """
         with SQLiteConnection() as c:
             messages = c.cursor.execute(
                 "SELECT id, role, model, date_time, content FROM message WHERE chat_id=?",
@@ -334,7 +452,54 @@ class Instance:
 
         return messages
 
+    def get_messages_paginated(chat, limit: int = 50, offset: int = 0) -> list:
+        """
+        Get messages for a chat with pagination support.
+        
+        Args:
+            chat: The chat object
+            limit: Maximum number of messages to return
+            offset: Number of messages to skip from the start
+            
+        Returns:
+            List of message tuples (id, role, model, date_time, content)
+        """
+        with SQLiteConnection() as c:
+            messages = c.cursor.execute(
+                "SELECT id, role, model, date_time, content FROM message WHERE chat_id=? ORDER BY date_time ASC LIMIT ? OFFSET ?",
+                (chat.chat_id, limit, offset),
+            ).fetchall()
+
+        return messages
+
+    def get_message_count(chat) -> int:
+        """
+        Get the total number of messages in a chat.
+        
+        Args:
+            chat: The chat object
+            
+        Returns:
+            Total number of messages
+        """
+        with SQLiteConnection() as c:
+            count = c.cursor.execute(
+                "SELECT COUNT(*) FROM message WHERE chat_id=?",
+                (chat.chat_id,),
+            ).fetchone()[0]
+
+        return count
+
     def get_attachments(message) -> list:
+        """
+        Retrieve all attachments for a specific message.
+        
+        Args:
+            message: The message object containing message_id
+            
+        Returns:
+            List of tuples containing (id, type, name, content)
+        """
         with SQLiteConnection() as c:
             attachments = c.cursor.execute(
                 "SELECT id, type, name, content FROM attachment WHERE message_id=?",
@@ -344,6 +509,13 @@ class Instance:
         return attachments
 
     def export_db(chat, export_sql_path: str) -> None:
+        """
+        Export a chat and all its messages and attachments to a separate database file.
+        
+        Args:
+            chat: The chat object to export
+            export_sql_path: Path where the exported database should be saved
+        """
         with SQLiteConnection() as c:
             c.cursor.execute("ATTACH DATABASE ? AS export", (export_sql_path,))
             c.cursor.execute(
@@ -360,6 +532,12 @@ class Instance:
             )
 
     def insert_or_update_chat(chat) -> None:
+        """
+        Insert a new chat or update an existing one in the database.
+        
+        Args:
+            chat: The chat object to save (must have chat_id, get_name(), folder_id, is_template)
+        """
         with SQLiteConnection() as c:
             if c.cursor.execute(
                 "SELECT id FROM chat WHERE id=?", (chat.chat_id,)
@@ -387,6 +565,12 @@ class Instance:
                     )
 
     def delete_chat(chat) -> None:
+        """
+        Delete a chat and all its associated messages and attachments.
+        
+        Args:
+            chat: The chat object to delete (must have chat_id)
+        """
         with SQLiteConnection() as c:
             c.cursor.execute("DELETE FROM chat WHERE id=?", (chat.chat_id,))
 
@@ -401,7 +585,12 @@ class Instance:
                 "DELETE FROM message WHERE chat_id=?", (chat.chat_id,)
             )
 
-    def factory_reset() -> None: # Deletes all chat folders and everything inside
+    def factory_reset() -> None:
+        """
+        Delete all chats, folders, messages, and attachments from the database.
+        
+        This is a destructive operation that cannot be undone.
+        """
         with SQLiteConnection() as c:
             c.cursor.execute("DELETE FROM chat_folder")
             c.cursor.execute("DELETE FROM chat")
@@ -409,6 +598,13 @@ class Instance:
             c.cursor.execute("DELETE FROM attachment")
 
     def duplicate_chat(old_chat_id:str, new_chat) -> None:
+        """
+        Create a duplicate of an existing chat with all its messages and attachments.
+        
+        Args:
+            old_chat_id: The ID of the chat to duplicate
+            new_chat: The new chat object to create (must have chat_id)
+        """
         with SQLiteConnection() as c:
             Instance.insert_or_update_chat(new_chat)
 
@@ -892,3 +1088,125 @@ class Instance:
 
         for row in result:
             Instance.remove_folder(row[0])
+
+    # Prompt Library Methods
+    
+    def save_prompt(name: str, content: str, category: str = None) -> str:
+        """
+        Save a prompt to the library.
+        
+        Args:
+            name: The name of the prompt
+            content: The prompt content/text
+            category: Optional category for organization
+            
+        Returns:
+            The ID of the saved prompt
+        """
+        prompt_id = str(uuid.uuid4())
+        created_at = datetime.datetime.now()
+        
+        with SQLiteConnection() as c:
+            c.cursor.execute(
+                "INSERT INTO prompt (id, name, content, category, created_at) VALUES (?, ?, ?, ?, ?)",
+                (prompt_id, name, content, category, created_at)
+            )
+        
+        return prompt_id
+    
+    def get_prompts(category: str = None):
+        """
+        Get prompts from the library, optionally filtered by category.
+        
+        Args:
+            category: Optional category to filter by. If None, returns all prompts.
+            
+        Returns:
+            List of prompt dictionaries with id, name, content, category, created_at
+        """
+        with SQLiteConnection() as c:
+            if category:
+                result = c.cursor.execute(
+                    "SELECT id, name, content, category, created_at FROM prompt WHERE category=? ORDER BY created_at DESC",
+                    (category,)
+                ).fetchall()
+            else:
+                result = c.cursor.execute(
+                    "SELECT id, name, content, category, created_at FROM prompt ORDER BY created_at DESC"
+                ).fetchall()
+        
+        prompts = []
+        for row in result:
+            prompts.append({
+                'id': row[0],
+                'name': row[1],
+                'content': row[2],
+                'category': row[3],
+                'created_at': row[4]
+            })
+        
+        return prompts
+    
+    def get_prompt_categories():
+        """
+        Get all unique categories from the prompt library.
+        
+        Returns:
+            List of category names (excluding None)
+        """
+        with SQLiteConnection() as c:
+            result = c.cursor.execute(
+                "SELECT DISTINCT category FROM prompt WHERE category IS NOT NULL ORDER BY category"
+            ).fetchall()
+        
+        return [row[0] for row in result]
+    
+    def delete_prompt(prompt_id: str) -> bool:
+        """
+        Delete a prompt from the library.
+        
+        Args:
+            prompt_id: The ID of the prompt to delete
+            
+        Returns:
+            True if deleted successfully, False otherwise
+        """
+        with SQLiteConnection() as c:
+            c.cursor.execute("DELETE FROM prompt WHERE id=?", (prompt_id,))
+            return c.cursor.rowcount > 0
+    
+    def update_prompt(prompt_id: str, name: str = None, content: str = None, category: str = None) -> bool:
+        """
+        Update a prompt in the library.
+        
+        Args:
+            prompt_id: The ID of the prompt to update
+            name: New name (optional)
+            content: New content (optional)
+            category: New category (optional)
+            
+        Returns:
+            True if updated successfully, False otherwise
+        """
+        updates = []
+        params = []
+        
+        if name is not None:
+            updates.append("name=?")
+            params.append(name)
+        if content is not None:
+            updates.append("content=?")
+            params.append(content)
+        if category is not None:
+            updates.append("category=?")
+            params.append(category)
+        
+        if not updates:
+            return False
+        
+        params.append(prompt_id)
+        query = f"UPDATE prompt SET {', '.join(updates)} WHERE id=?"
+        
+        with SQLiteConnection() as c:
+            c.cursor.execute(query, tuple(params))
+            return c.cursor.rowcount > 0
