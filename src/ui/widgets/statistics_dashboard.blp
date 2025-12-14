@@ -1,0 +1,160 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $AlpacaStatisticsDashboard: Adw.Dialog {
+  title: _("Statistics");
+  content-width: 600;
+  content-height: 700;
+
+  child: Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {
+      [end]
+      Button refresh_button {
+        icon-name: "view-refresh-symbolic";
+        tooltip-text: _("Refresh Statistics");
+      }
+    }
+
+    content: Adw.Clamp {
+      maximum-size: 600;
+      tightening-threshold: 400;
+
+      child: Gtk.ScrolledWindow {
+        hscrollbar-policy: never;
+
+        child: Gtk.Box {
+          orientation: vertical;
+          spacing: 24;
+          margin-top: 24;
+          margin-bottom: 24;
+          margin-start: 12;
+          margin-end: 12;
+
+          // Date Range Selector
+          Adw.PreferencesGroup {
+            Adw.ComboRow date_range_combo {
+              title: _("Time Period");
+              model: StringList {
+                strings [
+                  _("All Time"),
+                  _("Last 7 Days"),
+                  _("Last 30 Days"),
+                  _("Last 90 Days"),
+                ]
+              };
+            }
+          }
+
+          // Token Usage Section
+          Adw.PreferencesGroup {
+            title: _("Token Usage");
+            description: _("Total tokens consumed across all conversations");
+
+            Adw.ActionRow {
+              title: _("Total Tokens");
+              
+              Gtk.Label token_usage_label {
+                label: "0";
+                styles [
+                  "title-1",
+                ]
+              }
+            }
+
+            Gtk.Box token_usage_by_model_box {
+              orientation: vertical;
+              spacing: 0;
+              styles [
+                "boxed-list",
+              ]
+            }
+          }
+
+          // Response Time Section
+          Adw.PreferencesGroup {
+            title: _("Response Times");
+            description: _("Model response time analytics");
+
+            Gtk.Box {
+              orientation: vertical;
+              spacing: 0;
+              styles [
+                "boxed-list",
+              ]
+
+              Adw.ActionRow {
+                title: _("Average");
+                
+                Gtk.Label response_time_avg_label {
+                  label: "0 ms";
+                  styles [
+                    "title-3",
+                  ]
+                }
+              }
+
+              Adw.ActionRow {
+                title: _("Median");
+                
+                Gtk.Label response_time_median_label {
+                  label: "0 ms";
+                  styles [
+                    "title-3",
+                  ]
+                }
+              }
+
+              Adw.ActionRow {
+                title: _("Minimum");
+                
+                Gtk.Label response_time_min_label {
+                  label: "0 ms";
+                  styles [
+                    "title-3",
+                  ]
+                }
+              }
+
+              Adw.ActionRow {
+                title: _("Maximum");
+                
+                Gtk.Label response_time_max_label {
+                  label: "0 ms";
+                  styles [
+                    "title-3",
+                  ]
+                }
+              }
+
+              Adw.ActionRow {
+                title: _("Total Requests");
+                
+                Gtk.Label response_time_total_label {
+                  label: "0";
+                  styles [
+                    "title-3",
+                  ]
+                }
+              }
+            }
+          }
+
+          // Model Usage Section
+          Adw.PreferencesGroup {
+            title: _("Model Usage");
+            description: _("Frequency of model usage");
+
+            Gtk.Box model_usage_box {
+              orientation: vertical;
+              spacing: 0;
+              styles [
+                "boxed-list",
+              ]
+            }
+          }
+        };
+      };
+    };
+  };
+}
