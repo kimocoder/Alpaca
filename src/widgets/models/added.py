@@ -4,6 +4,7 @@ from gi.repository import Gtk, Gio, Adw, GLib, Gdk, GObject
 import logging, os, re, datetime, threading, sys, glob, icu, base64, hashlib, importlib.util
 from ...constants import STT_MODELS, TTS_VOICES, data_dir, cache_dir
 from ...sql_manager import prettify_model_name, Instance as SQL
+from ...utils.model_utils import estimate_memory_usage
 from .. import dialog, attachments
 from .common import CategoryPill, get_available_models_data, InfoBox
 
@@ -99,11 +100,20 @@ class AddedModelDialog(Adw.Dialog):
         self.voice_combo.set_selected(selected_index)
 
         parent_model = self.model.data.get('details', {}).get('parent_model')
+        parameter_size = self.model.data.get('details', {}).get('parameter_size')
+        quantization_level = self.model.data.get('details', {}).get('quantization_level')
+        
+        # Calculate memory estimate
+        memory_estimate = None
+        if parameter_size and quantization_level:
+            memory_estimate = estimate_memory_usage(parameter_size, quantization_level)
+        
         metadata={
             _('Tag'): prettify_model_name(self.model.get_name(), True)[1],
             _('Family'): prettify_model_name(self.model.data.get('details', {}).get('family')),
-            _('Parameter Size'): self.model.data.get('details', {}).get('parameter_size'),
-            _('Quantization Level'): self.model.data.get('details', {}).get('quantization_level')
+            _('Parameter Size'): parameter_size,
+            _('Quantization Level'): quantization_level,
+            _('Estimated Memory'): memory_estimate
         }
         if parent_model and '/' not in parent_model:
             metadata[_('Parent Model')] = prettify_model_name(parent_model)

@@ -7,6 +7,7 @@ from .. import dialog, tools, chat
 from ...ollama_models import OLLAMA_MODELS
 from ...constants import data_dir, cache_dir, TITLE_GENERATION_PROMPT_OLLAMA, MAX_TOKENS_TITLE_GENERATION
 from ...sql_manager import generate_uuid, dict_to_metadata_string, Instance as SQL
+from ...services.model_cache import get_cache, make_cache_key
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,12 @@ class BaseInstance:
             bot_message.finish_generation('')
 
     def generate_response(self, bot_message, chat, messages:list, model:str):
+        # Import statistics service
+        from ...services.statistics import StatisticsService
+        
+        # Track start time for response time measurement
+        start_time = datetime.datetime.now()
+        
         if self.properties.get('share_name', 0) > 0:
             user_display_name = None
             if self.properties.get('share_name') == 1:
@@ -222,6 +229,32 @@ class BaseInstance:
                 logger.error(e)
                 if self.row:
                     self.row.get_parent().unselect_all()
+        
+        # Calculate response time
+        end_time = datetime.datetime.now()
+        response_time_ms = int((end_time - start_time).total_seconds() * 1000)
+        
+        # Record statistics
+        try:
+            stats_service = StatisticsService()
+            
+            # Record model usage
+            stats_service.record_model_usage(model)
+            
+            # Record response time
+            stats_service.record_response_time(model, response_time_ms)
+            
+            # Record token usage if available in response
+            if data.get('eval_count'):
+                # eval_count is the number of tokens in the response
+                stats_service.record_token_usage(model, data.get('eval_count'))
+            elif data.get('prompt_eval_count') and data.get('eval_count'):
+                # Total tokens = prompt tokens + completion tokens
+                total_tokens = data.get('prompt_eval_count', 0) + data.get('eval_count', 0)
+                stats_service.record_token_usage(model, total_tokens)
+        except Exception as e:
+            logger.error(f"Error recording statistics: {e}")
+        
         metadata_string = None
         if self.properties.get('show_response_metadata'):
             metadata_string = dict_to_metadata_string(data)
@@ -350,6 +383,16 @@ class BaseInstance:
         return {}
 
     def get_model_info(self, model_name:str) -> dict:
+        # Check cache first
+        cache = get_cache()
+        cache_key = make_cache_key(self.instance_id, model_name)
+        cached_info = cache.get(cache_key)
+        
+        if cached_info is not None:
+            logger.debug(f"Using cached model info for {model_name}")
+            return cached_info
+        
+        # Cache miss - fetch from API
         if not self.process:
             self.start()
         try:
@@ -365,7 +408,11 @@ class BaseInstance:
                 stream=False
             )
             if response.status_code == 200:
-                return json.loads(response.text)
+                model_info = json.loads(response.text)
+                # Store in cache
+                cache.set(cache_key, model_info)
+                logger.debug(f"Fetched and cached model info for {model_name}")
+                return model_info
         except Exception as e:
             logger.error(e)
         return {}
@@ -468,6 +515,12 @@ class BaseInstance:
                     "name": model_name
                 })
             )
+            if response.status_code == 200:
+                # Invalidate cache for deleted model
+                cache = get_cache()
+                cache_key = make_cache_key(self.instance_id, model_name)
+                cache.invalidate(cache_key)
+                logger.debug(f"Invalidated cache for deleted model {model_name}")
             return response.status_code == 200
         except Exception as e:
             return False
@@ -660,6 +713,11 @@ class OllamaCloud(BaseInstance):
 
     def delete_model(self, model_name:str) -> bool:
         SQL.remove_online_instance_model_list(self.instance_id, model_name)
+        # Invalidate cache for deleted model
+        cache = get_cache()
+        cache_key = make_cache_key(self.instance_id, model_name)
+        cache.invalidate(cache_key)
+        logger.debug(f"Invalidated cache for deleted model {model_name}")
         return True
 
     def get_local_models(self) -> list:

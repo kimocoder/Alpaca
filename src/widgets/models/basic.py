@@ -4,6 +4,7 @@ from gi.repository import Gtk, Gio, Adw, GLib, Gdk, GObject
 import logging, os, re, datetime, threading, sys, glob, icu, base64, hashlib, importlib.util
 from ...constants import STT_MODELS, TTS_VOICES, REMBG_MODELS, data_dir, cache_dir
 from ...sql_manager import prettify_model_name, Instance as SQL
+from ...utils.model_utils import estimate_memory_usage
 from .. import dialog, attachments
 from .added import AddedModelRow, AddedModelDialog, append_to_model_selector, list_from_selector
 from .common import CategoryPill, get_available_models_data, prompt_existing, remove_added_model, prepend_added_model
@@ -219,12 +220,27 @@ class BasicModelButton(Gtk.Button):
             self.set_subtitle(subtitle)
         else:
             family = prettify_model_name(self.data.get('details', {}).get('family'))
-            if family and family.upper().replace(' ', '').replace('-', '') != self.model_title.upper().replace(' ', '').replace('-', '') and tag:
-                self.set_subtitle('{} • {}'.format(family, tag))
-            elif tag:
-                self.set_subtitle(tag)
-            elif family:
-                self.set_subtitle(family)
+            parameter_size = self.data.get('details', {}).get('parameter_size')
+            quantization_level = self.data.get('details', {}).get('quantization_level')
+            
+            # Calculate memory estimate
+            memory_estimate = None
+            if parameter_size and quantization_level:
+                memory_estimate = estimate_memory_usage(parameter_size, quantization_level)
+            
+            # Build subtitle with available information
+            subtitle_parts = []
+            if family and family.upper().replace(' ', '').replace('-', '') != self.model_title.upper().replace(' ', '').replace('-', ''):
+                subtitle_parts.append(family)
+            if tag:
+                subtitle_parts.append(tag)
+            elif not subtitle_parts and family:
+                subtitle_parts.append(family)
+            if memory_estimate:
+                subtitle_parts.append(memory_estimate)
+            
+            if subtitle_parts:
+                self.set_subtitle(' • '.join(subtitle_parts))
 
         self.category_container.set_visible(len(self.data.get('categories', [])))
         for category in set(self.data.get('categories', [])):

@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from .. import dialog, tools, chat
 from ...sql_manager import generate_uuid, Instance as SQL
 from ...constants import MAX_TOKENS_TITLE_GENERATION, TITLE_GENERATION_PROMPT_OPENAI
+from ...services.model_cache import get_cache, make_cache_key
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +159,13 @@ class BaseInstance:
             bot_message.finish_generation('')
 
     def generate_response(self, bot_message, chat, messages:list, model:str):
+        # Import statistics service
+        from ...services.statistics import StatisticsService
+        import datetime
+        
+        # Track start time for response time measurement
+        start_time = datetime.datetime.now()
+        
         if 'no-system-messages' in self.limitations:
             for i in range(len(messages)):
                 if messages[i].get('role') == 'system':
@@ -188,6 +196,7 @@ class BaseInstance:
             if self.properties.get('seed', 0) != 0:
                 params["seed"] = self.properties.get('seed')
 
+        usage_data = None
         if chat.busy:
             try:
                 bot_message.block_container.clear()
@@ -197,6 +206,9 @@ class BaseInstance:
                         delta = chunk.choices[0].delta
                         if delta.content:
                             bot_message.update_message(delta.content)
+                    # Capture usage data if available
+                    if hasattr(chunk, 'usage') and chunk.usage:
+                        usage_data = chunk.usage
                     if not chat.busy:
                         break
             except Exception as e:
@@ -209,6 +221,29 @@ class BaseInstance:
                 logger.error(e)
                 if self.row:
                     self.row.get_parent().unselect_all()
+        
+        # Calculate response time
+        end_time = datetime.datetime.now()
+        response_time_ms = int((end_time - start_time).total_seconds() * 1000)
+        
+        # Record statistics
+        try:
+            stats_service = StatisticsService()
+            
+            # Record model usage
+            stats_service.record_model_usage(model)
+            
+            # Record response time
+            stats_service.record_response_time(model, response_time_ms)
+            
+            # Record token usage if available
+            if usage_data:
+                total_tokens = getattr(usage_data, 'total_tokens', 0)
+                if total_tokens > 0:
+                    stats_service.record_token_usage(model, total_tokens)
+        except Exception as e:
+            logger.error(f"Error recording statistics: {e}")
+        
         bot_message.finish_generation()
 
     def generate_chat_title(self, chat, prompt:str, fallback_model:str):
@@ -298,6 +333,11 @@ class BaseInstance:
 
     def delete_model(self, model_name:str) -> bool:
         SQL.remove_online_instance_model_list(self.instance_id, model_name)
+        # Invalidate cache for deleted model
+        cache = get_cache()
+        cache_key = make_cache_key(self.instance_id, model_name)
+        cache.invalidate(cache_key)
+        logger.debug(f"Invalidated cache for deleted model {model_name}")
         return True
 
     def get_model_info(self, model_name:str) -> dict:
@@ -343,10 +383,23 @@ class Gemini(BaseInstance):
         return {}
 
     def get_model_info(self, model_name:str) -> dict:
+        # Check cache first
+        cache = get_cache()
+        cache_key = make_cache_key(self.instance_id, model_name)
+        cached_info = cache.get(cache_key)
+        
+        if cached_info is not None:
+            logger.debug(f"Using cached model info for {model_name}")
+            return cached_info
+        
+        # Cache miss - fetch from API
         try:
             response = requests.get('https://generativelanguage.googleapis.com/v1beta/models/{}?key={}'.format(model_name, self.properties.get('api')))
             data = response.json()
             data['capabilities'] = ['completion', 'vision']
+            # Store in cache
+            cache.set(cache_key, data)
+            logger.debug(f"Fetched and cached model info for {model_name}")
             return data
         except Exception as e:
             logger.error(e)
