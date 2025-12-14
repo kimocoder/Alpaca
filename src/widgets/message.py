@@ -8,12 +8,19 @@ from gi.repository import Gtk, Gio, Adw, GLib, Gdk, GtkSource, Spelling
 import os, datetime, threading, sys, base64, logging, re, tempfile
 from ..sql_manager import prettify_model_name, generate_uuid, format_datetime, Instance as SQL
 from . import attachments, blocks, dialog, voice, tools, models, chat, activities
+from ..utils.accessibility import configure_button_accessibility
 
 
 logger = logging.getLogger(__name__)
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/message/popup.ui')
 class OptionPopup(Gtk.Popover):
+    """
+    Popup menu for message actions.
+    
+    Provides options to delete, copy, edit, regenerate messages,
+    and toggle text-to-speech.
+    """
     __gtype_name__ = 'AlpacaMessagePopup'
 
     delete_button = Gtk.Template.Child()
@@ -21,6 +28,33 @@ class OptionPopup(Gtk.Popover):
     edit_button = Gtk.Template.Child()
     regenerate_button = Gtk.Template.Child()
     tts_button = Gtk.Template.Child()
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._setup_accessibility()
+    
+    def _setup_accessibility(self):
+        """Configure ARIA labels for message popup buttons"""
+        configure_button_accessibility(
+            self.delete_button,
+            _("Delete message"),
+            _("Remove this message from the conversation")
+        )
+        configure_button_accessibility(
+            self.copy_button,
+            _("Copy message"),
+            _("Copy message text to clipboard")
+        )
+        configure_button_accessibility(
+            self.edit_button,
+            _("Edit message"),
+            _("Edit this message")
+        )
+        configure_button_accessibility(
+            self.regenerate_button,
+            _("Regenerate message"),
+            _("Generate a new response for this message")
+        )
 
     def change_status(self, status:bool):
         self.delete_button.set_sensitive(status)
@@ -104,6 +138,12 @@ class OptionPopup(Gtk.Popover):
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/message/block_container.ui')
 class BlockContainer(Gtk.Box):
+    """
+    Container widget for message content blocks.
+    
+    Manages and displays different types of content blocks (text, code, tables, etc.)
+    within a message.
+    """
     __gtype_name__ = 'AlpacaBlockContainer'
 
     def __init__(self):
@@ -180,6 +220,12 @@ class BlockContainer(Gtk.Box):
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/message/message.ui')
 class Message(Gtk.Box):
+    """
+    Widget representing a single message in a chat conversation.
+    
+    Displays message content, attachments, metadata, and provides
+    interaction options like editing, copying, and regenerating.
+    """
     __gtype_name__ = 'AlpacaMessage'
 
     main_container = Gtk.Template.Child()
@@ -355,6 +401,9 @@ class Message(Gtk.Box):
 
         if chat_element and root:
             chat_element.stop_message()
+            # Update context indicator after message generation
+            if root.get_name() == 'AlpacaWindow':
+                GLib.idle_add(root.schedule_context_indicator_update)
         buffer = self.block_container.generating_block.buffer
         final_text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
         self.block_container.add_content(final_text)
@@ -382,6 +431,12 @@ class Message(Gtk.Box):
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/message/global_message_textview.ui')
 class GlobalMessageTextView(GtkSource.View):
+    """
+    Text input widget for composing messages.
+    
+    Provides syntax highlighting, spell checking, and keyboard shortcuts
+    for message composition.
+    """
     __gtype_name__ = 'AlpacaGlobalMessageTextView'
 
     def __init__(self):
@@ -460,7 +515,33 @@ class GlobalMessageTextView(GtkSource.View):
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/message/global_action_stack.ui')
 class GlobalActionStack(Gtk.Stack):
+    """
+    Stack widget for message action buttons.
+    
+    Switches between different action button states (send, stop, etc.)
+    based on conversation state.
+    """
     __gtype_name__ = 'AlpacaGlobalActionStack'
+    
+    send_button = Gtk.Template.Child()
+    stop_button = Gtk.Template.Child()
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._setup_accessibility()
+    
+    def _setup_accessibility(self):
+        """Configure ARIA labels for action buttons"""
+        configure_button_accessibility(
+            self.send_button,
+            _("Send message"),
+            _("Send the message to the AI model")
+        )
+        configure_button_accessibility(
+            self.stop_button,
+            _("Stop generation"),
+            _("Stop the AI from generating a response")
+        )
 
     @Gtk.Template.Callback()
     def stop_message(self, button=None):
@@ -512,6 +593,12 @@ class GlobalActionStack(Gtk.Stack):
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/message/global_footer.ui')
 class GlobalFooter(Gtk.Box):
+    """
+    Footer widget containing message input and action buttons.
+    
+    Provides the main interface for composing and sending messages,
+    including attachment buttons and voice input.
+    """
     __gtype_name__ = 'AlpacaGlobalFooter'
 
     attachment_container = Gtk.Template.Child()

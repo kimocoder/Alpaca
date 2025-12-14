@@ -22,6 +22,18 @@ from ..sql_manager import Instance as SQL
 logger = logging.getLogger(__name__)
 
 def extract_content(file_type:str, file_path:str) -> str:
+    """
+    Extract text content from various file types.
+    
+    Supports plain text, code, PDF, DOCX, PPTX, ODT, YouTube transcripts, and websites.
+    
+    Args:
+        file_type: Type of file to extract from (e.g., 'plain_text', 'pdf', 'website')
+        file_path: Path to the file or URL to extract content from
+        
+    Returns:
+        Extracted text content as a string
+    """
     if file_type in ('plain_text', 'code'):
         with open(file_path, 'r') as f:
             return f.read()
@@ -77,6 +89,16 @@ def extract_content(file_type:str, file_path:str) -> str:
             return "Fetching this URL is disallowed by robots.txt"
 
 def extract_online_image(image_url:str, max_size:int) -> str | None:
+    """
+    Download and extract an image from a URL.
+    
+    Args:
+        image_url: URL of the image to download
+        max_size: Maximum dimension (width or height) for the resized image
+        
+    Returns:
+        Base64-encoded image data, or None if download fails
+    """
     image_response = requests.get(image_url)
     if image_response.status_code == 200:
         image_data = None
@@ -89,7 +111,20 @@ def extract_online_image(image_url:str, max_size:int) -> str | None:
         return image_data
 
 def extract_image(image_path:str, max_size:int) -> str:
-    #Normal Image: 640, Profile Pictures: 128
+    """
+    Extract and resize an image from a file path.
+    
+    Resizes the image to fit within max_size while maintaining aspect ratio,
+    then encodes it as base64.
+    
+    Args:
+        image_path: Path to the image file
+        max_size: Maximum dimension (width or height) for the resized image
+                  (e.g., 640 for normal images, 128 for profile pictures)
+        
+    Returns:
+        Base64-encoded PNG image data
+    """
     with Image.open(image_path) as img:
         width, height = img.size
         if width > height:
@@ -106,6 +141,12 @@ def extract_image(image_path:str, max_size:int) -> str:
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/attachments/attachment.ui')
 class Attachment(Gtk.Button):
+    """
+    Widget representing a file attachment in a message.
+    
+    Displays file name, type icon, and provides access to file content.
+    Supports various file types including documents, code, and web links.
+    """
     __gtype_name__ = 'AlpacaAttachment'
 
     def __init__(self, file_id:str, file_name:str, file_type:str, file_content:str):
@@ -286,6 +327,12 @@ class Attachment(Gtk.Button):
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/attachments/image_attachment.ui')
 class ImageAttachment(Gtk.Button):
+    """
+    Widget representing an image attachment in a message.
+    
+    Displays a thumbnail of the attached image and provides
+    access to view the full-size image.
+    """
     __gtype_name__ = 'AlpacaImageAttachment'
 
     def __init__(self, file_id:str, file_name:str, file_content:str):
@@ -397,6 +444,12 @@ class ImageAttachment(Gtk.Button):
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/attachments/attachment_container.ui')
 class AttachmentContainer(Gtk.ScrolledWindow):
+    """
+    Container widget for displaying multiple file attachments.
+    
+    Provides a scrollable list of attachment widgets with
+    add/remove functionality.
+    """
     __gtype_name__ = 'AlpacaAttachmentContainer'
 
     force_dialog = False
@@ -547,6 +600,11 @@ class AttachmentContainer(Gtk.ScrolledWindow):
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/attachments/image_attachment_container.ui')
 class ImageAttachmentContainer(Gtk.ScrolledWindow):
+    """
+    Container widget for displaying multiple image attachments.
+    
+    Provides a scrollable horizontal list of image thumbnails.
+    """
     __gtype_name__ = 'AlpacaImageAttachmentContainer'
 
     force_dialog = False
@@ -569,6 +627,11 @@ class ImageAttachmentContainer(Gtk.ScrolledWindow):
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/attachments/global_attachment_button.ui')
 class GlobalAttachmentButton(Gtk.Button):
+    """
+    Button for adding attachments to messages.
+    
+    Opens a file picker dialog to select files for attachment.
+    """
     __gtype_name__ = 'AlpacaGlobalAttachmentButton'
 
     def __init__(self):

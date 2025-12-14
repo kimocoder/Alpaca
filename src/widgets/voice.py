@@ -40,6 +40,12 @@ threading.Thread(target=preload_heavy_libraries, daemon=True).start()
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/voice/dictate_button.ui')
 class DictateButton(Gtk.Stack):
+    """
+    Button widget for text-to-speech functionality.
+    
+    Provides controls for playing AI-generated speech from message content
+    using the Kokoro TTS engine.
+    """
     __gtype_name__ = 'AlpacaDictateButton'
 
     button = Gtk.Template.Child()
@@ -152,6 +158,12 @@ class DictateButton(Gtk.Stack):
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/voice/microphone_button.ui')
 class MicrophoneButton(Gtk.Stack):
+    """
+    Button widget for speech-to-text functionality.
+    
+    Provides controls for recording audio and transcribing it to text
+    using Whisper speech recognition.
+    """
     __gtype_name__ = 'AlpacaMicrophoneButton'
 
     button = Gtk.Template.Child()
@@ -282,6 +294,12 @@ class MicrophoneButton(Gtk.Stack):
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/voice/podcast_dialog.ui')
 class PodcastDialog(Adw.Dialog):
+    """
+    Dialog for generating podcast-style audio from conversations.
+    
+    Converts chat messages into a podcast format with multiple voices
+    and natural conversation flow.
+    """
     __gtype_name__ = 'AlpacaPodcastDialog'
 
     main_stack = Gtk.Template.Child()

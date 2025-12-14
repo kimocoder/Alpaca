@@ -5,6 +5,12 @@ import shutil
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/welcome.ui')
 class Welcome(Adw.NavigationPage):
+    """
+    Welcome screen shown on first launch.
+    
+    Provides an introduction to Alpaca and guides users through
+    initial setup and configuration.
+    """
     __gtype_name__ = 'AlpacaWelcome'
 
     welcome_previous_button = Gtk.Template.Child()
@@ -55,6 +61,12 @@ class Welcome(Adw.NavigationPage):
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/notice.ui')
 class Notice(Adw.Dialog):
+    """
+    Dialog for displaying important notices and announcements.
+    
+    Shows release notes, important updates, or other notifications
+    to users when they launch the application.
+    """
     __gtype_name__ = 'AlpacaNotice'
 
     @Gtk.Template.Callback()

@@ -10,12 +10,22 @@ from ..constants import SAMPLE_PROMPTS, cache_dir
 from ..sql_manager import generate_uuid, prettify_model_name, generate_numbered_name, Instance as SQL
 from . import dialog, voice, models
 from .message import Message
+from ..utils.message_virtualization import MessageVirtualizationManager
+from ..services.token_counter import count_chat_tokens, get_token_stats
+from ..utils.accessibility import set_accessible_label
+from ..utils import keyboard_navigation
 
 logger = logging.getLogger(__name__)
 
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/chat/folder.ui')
 class Folder(Adw.NavigationPage):
+    """
+    Widget representing a folder that contains chats and subfolders.
+    
+    Provides drag-and-drop functionality for organizing chats and folders,
+    and displays a hierarchical list of chats and subfolders.
+    """
     __gtype_name__ = 'AlpacaFolder'
 
     bottom_bar = Gtk.Template.Child()
@@ -276,6 +286,9 @@ class Folder(Adw.NavigationPage):
             # Show New Stack Page
             self.get_root().chat_bin.set_child(new_chat)
 
+            # Update context indicator
+            GLib.idle_add(self.get_root().update_context_indicator, new_chat)
+
             # Select Model
             GLib.idle_add(self.auto_select_model)
 
@@ -301,6 +314,12 @@ class Folder(Adw.NavigationPage):
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/chat/template_selector.ui')
 class TemplateSelector(Adw.Dialog):
+    """
+    Dialog for selecting and creating new chats from saved templates.
+    
+    Displays available chat templates and allows users to create new chats
+    based on those templates.
+    """
     __gtype_name__ = 'AlpacaTemplateSelector'
 
     main_stack = Gtk.Template.Child()
@@ -348,6 +367,12 @@ class TemplateSelector(Adw.Dialog):
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/chat/chat.ui')
 class Chat(Gtk.Stack):
+    """
+    Main chat widget that displays conversation messages and handles user interactions.
+    
+    Manages message display, user input, model selection, and conversation state.
+    Supports features like message virtualization, token counting, and context management.
+    """
     __gtype_name__ = 'AlpacaChat'
 
     scrolledwindow = Gtk.Template.Child()
@@ -365,24 +390,112 @@ class Chat(Gtk.Stack):
         self.is_template = is_template
         self.row = ChatRow(self)
         self.use_template_button.set_visible(bool(self.chat_id))
+        
+        # Initialize message virtualization manager
+        self.virtualization_manager = MessageVirtualizationManager(
+            self.scrolledwindow,
+            self.container
+        )
+        
+        # Lazy loading state
+        self._messages_loaded = 0
+        self._total_messages = 0
+        self._batch_size = 50
+        self._is_loading = False
+        self._all_messages_loaded = False
+        
+        # Connect to scroll events for lazy loading
+        vadjustment = self.scrolledwindow.get_vadjustment()
+        if vadjustment:
+            vadjustment.connect('value-changed', self._on_scroll_for_lazy_load)
+        
+        # Set up keyboard navigation
+        self._setup_keyboard_navigation()
+        
         GLib.idle_add(self.update_prompts)
+    
+    def _setup_keyboard_navigation(self):
+        """Set up keyboard navigation for the chat widget"""
+        try:
+            # Make the scrolled window focusable for keyboard scrolling
+            keyboard_navigation.make_widget_keyboard_accessible(self.scrolledwindow)
+            
+            # Make buttons keyboard accessible
+            keyboard_navigation.make_button_keyboard_accessible(
+                self.use_template_button,
+                _("Use this template to start a new chat")
+            )
+            
+            logger.debug(f"Keyboard navigation set up for chat: {self.chat_id}")
+        except Exception as e:
+            logger.warning(f"Error setting up keyboard navigation for chat: {e}")
 
     def stop_message(self):
         self.busy = False
         self.get_root().global_footer.toggle_action_button(True)
 
     def unload_messages(self):
+        # Disable virtualization while unloading
+        self.virtualization_manager.disable()
+        
         for widget in list(self.container):
             GLib.idle_add(widget.unparent)
             GLib.idle_add(widget.unrealize)
         self.set_visible_child_name('loading')
+        
+        # Reset lazy loading state
+        self._messages_loaded = 0
+        self._total_messages = 0
+        self._is_loading = False
+        self._all_messages_loaded = False
+        
+        # Re-enable virtualization
+        self.virtualization_manager.enable()
 
     def add_message(self, message):
         self.container.append(message)
         GLib.idle_add(self.set_visible_child_name, 'content')
+        
+        # Update virtualization after adding message
+        GLib.timeout_add(100, lambda: self.virtualization_manager.update_now() or False)
 
-    def load_messages(self):
-        messages = SQL.get_messages(self)
+    def load_messages(self, load_all: bool = False):
+        """
+        Load messages for this chat with lazy loading support.
+        
+        Args:
+            load_all: If True, load all messages at once (for backwards compatibility)
+        """
+        if load_all:
+            # Legacy behavior: load all messages at once
+            messages = SQL.get_messages(self)
+            self._load_message_batch(messages)
+            self._all_messages_loaded = True
+            self._messages_loaded = len(messages)
+            self._total_messages = len(messages)
+        else:
+            # Lazy loading: load initial batch
+            self._total_messages = SQL.get_message_count(self)
+            if self._total_messages == 0:
+                GLib.idle_add(self.set_visible_child_name, 'welcome-screen')
+                return
+            
+            # Load the most recent messages first
+            initial_batch_size = min(self._batch_size, self._total_messages)
+            offset = max(0, self._total_messages - initial_batch_size)
+            messages = SQL.get_messages_paginated(self, limit=initial_batch_size, offset=offset)
+            
+            self._load_message_batch(messages)
+            self._messages_loaded = len(messages)
+            self._all_messages_loaded = (self._messages_loaded >= self._total_messages)
+            
+            GLib.idle_add(self.set_visible_child_name, 'content')
+            
+            # Scroll to bottom after loading initial messages
+            GLib.timeout_add(100, self._scroll_to_bottom)
+    
+    def _load_message_batch(self, messages):
+        """Load a batch of messages into the container."""
         for message in messages:
             message_element = Message(
                 dt=datetime.datetime.strptime(message[3] + (":00" if message[3].count(":") == 1 else ""), '%Y/%m/%d %H:%M:%S'),
@@ -403,7 +516,92 @@ class Chat(Gtk.Stack):
                     ) and False
                 )
             GLib.idle_add(message_element.block_container.set_content, message[4])
-        GLib.idle_add(self.set_visible_child_name, 'content' if len(messages) > 0 else 'welcome-screen')
+        
+        # Notify virtualization manager that messages are loaded
+        if len(messages) > 0:
+            self.virtualization_manager.on_messages_loaded()
+    
+    def _scroll_to_bottom(self):
+        """Scroll to the bottom of the message container."""
+        vadjustment = self.scrolledwindow.get_vadjustment()
+        if vadjustment:
+            vadjustment.set_value(vadjustment.get_upper() - vadjustment.get_page_size())
+        return False
+    
+    def _on_scroll_for_lazy_load(self, adjustment):
+        """Handle scroll events for lazy loading older messages."""
+        if self._is_loading or self._all_messages_loaded:
+            return
+        
+        # Check if scrolled near the top (within 200 pixels)
+        if adjustment.get_value() < 200:
+            self._load_more_messages()
+    
+    def _load_more_messages(self):
+        """Load the next batch of older messages."""
+        if self._is_loading or self._all_messages_loaded:
+            return
+        
+        self._is_loading = True
+        
+        # Calculate how many more messages to load
+        remaining_messages = self._total_messages - self._messages_loaded
+        if remaining_messages <= 0:
+            self._all_messages_loaded = True
+            self._is_loading = False
+            return
+        
+        # Load the next batch
+        batch_size = min(self._batch_size, remaining_messages)
+        offset = max(0, self._total_messages - self._messages_loaded - batch_size)
+        
+        messages = SQL.get_messages_paginated(self, limit=batch_size, offset=offset)
+        
+        if messages:
+            # Remember current scroll position
+            vadjustment = self.scrolledwindow.get_vadjustment()
+            old_value = vadjustment.get_value()
+            old_upper = vadjustment.get_upper()
+            
+            # Prepend messages to the container
+            for message in reversed(messages):
+                message_element = Message(
+                    dt=datetime.datetime.strptime(message[3] + (":00" if message[3].count(":") == 1 else ""), '%Y/%m/%d %H:%M:%S'),
+                    message_id=message[0],
+                    mode=('user', 'assistant', 'system').index(message[1]),
+                    author=message[2]
+                )
+                self.container.prepend(message_element)
+
+                attachments = SQL.get_attachments(message_element)
+                for attachment in attachments:
+                    GLib.idle_add(
+                        lambda msg=message_element, att=attachment: msg.add_attachment(
+                            file_id=att[0],
+                            name=att[2],
+                            attachment_type=att[1],
+                            content=att[3]
+                        ) and False
+                    )
+                GLib.idle_add(message_element.block_container.set_content, message[4])
+            
+            self._messages_loaded += len(messages)
+            
+            # Restore scroll position (adjust for new content height)
+            GLib.timeout_add(50, lambda: self._restore_scroll_position(vadjustment, old_value, old_upper))
+            
+            # Check if all messages are loaded
+            if self._messages_loaded >= self._total_messages:
+                self._all_messages_loaded = True
+        
+        self._is_loading = False
+    
+    def _restore_scroll_position(self, adjustment, old_value, old_upper):
+        """Restore scroll position after prepending messages."""
+        new_upper = adjustment.get_upper()
+        height_difference = new_upper - old_upper
+        adjustment.set_value(old_value + height_difference)
+        return False
 
     def convert_to_ollama(self) -> list:
         messages = []
@@ -454,6 +652,27 @@ class Chat(Gtk.Stack):
                 messages.append(message_data)
         return messages
 
+    def get_token_count(self) -> int:
+        """
+        Get the total estimated token count for all messages in this chat.
+        
+        Returns:
+            Total estimated token count
+        """
+        return count_chat_tokens(self)
+    
+    def get_token_stats(self) -> dict:
+        """
+        Get detailed token statistics for this chat.
+        
+        Returns:
+            Dictionary containing:
+            - total_tokens: Total token count
+            - message_count: Number of messages
+            - avg_tokens_per_message: Average tokens per message
+        """
+        return get_token_stats(self)
+
     @Gtk.Template.Callback()
     def update_prompts(self, button=None):
         for el in list(self.prompt_container):
@@ -491,6 +710,12 @@ class Chat(Gtk.Stack):
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/chat/folder_row.ui')
 class FolderRow(Gtk.ListBoxRow):
+    """
+    List row widget representing a folder in the chat sidebar.
+    
+    Displays folder name, color, and provides drag-and-drop functionality
+    for organizing folders.
+    """
     __gtype_name__ = 'AlpacaFolderRow'
 
     label = Gtk.Template.Child()
@@ -673,6 +898,12 @@ class FolderRow(Gtk.ListBoxRow):
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/chat/chat_row.ui')
 class ChatRow(Gtk.ListBoxRow):
+    """
+    List row widget representing a chat in the sidebar.
+    
+    Displays chat name, last message time, and provides drag-and-drop
+    functionality for organizing chats into folders.
+    """
     __gtype_name__ = 'AlpacaChatRow'
 
     label = Gtk.Template.Child()
@@ -685,6 +916,9 @@ class ChatRow(Gtk.ListBoxRow):
         self.set_name(self.chat.get_name())
         self.set_tooltip_text(self.chat.get_name())
         self.label.set_label(self.chat.get_name())
+        
+        # Set accessible label
+        set_accessible_label(self, _("Chat: {name}").format(name=self.chat.get_name()))
 
         drag_source = Gtk.DragSource()
         drag_source.set_actions(Gdk.DragAction.MOVE)
@@ -913,17 +1147,33 @@ class ChatRow(Gtk.ListBoxRow):
         file_dialog.save(parent=self.get_root(), cancellable=None, callback=lambda file_dialog, result, temp_path=os.path.join(cache_dir, 'export.json'): self.on_export_chat(file_dialog, result, temp_path))
 
     def prompt_export(self):
-        options = {
-            _("Importable (.db)"): self.export_db,
-            _("Markdown"): lambda: self.export_md(False),
-            _("Markdown (Obsidian Style)"): lambda: self.export_md(True),
-            _("JSON"): lambda: self.export_json(False),
-            _("JSON (Include Metadata)"): lambda: self.export_json(True)
-        }
-        dialog.simple_dropdown(
+        # Define radio options with (label, value) tuples
+        # Value is (export_type, parameter) for routing to correct export function
+        radio_options = [
+            (_("Markdown"), ('markdown', False)),
+            (_("Markdown (Obsidian Style)"), ('markdown', True)),
+            (_("JSON"), ('json', False)),
+            (_("JSON (Include Metadata)"), ('json', True)),
+            (_("Database (.db)"), ('database', None))
+        ]
+        
+        def handle_export_selection(selected_value):
+            """Route the selected export format to the appropriate export function."""
+            if selected_value is None:
+                return
+            
+            export_type, param = selected_value
+            if export_type == 'markdown':
+                self.export_md(param)
+            elif export_type == 'json':
+                self.export_json(param)
+            elif export_type == 'database':
+                self.export_db()
+        
+        dialog.simple_radio(
             parent = self.get_root(),
             heading = _("Export Chat"),
-            body = _("Select a method to export the chat"),
-            callback = lambda option, options=options: options[option](),
-            items = options.keys()
+            body = _("Select a format to export the chat"),
+            callback = handle_export_selection,
+            radio_options = radio_options
         )
