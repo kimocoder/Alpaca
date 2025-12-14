@@ -127,8 +127,23 @@ install_data(alpaca_sources, install_dir: moduledir)
 # Install services module
 services_sources = [
   'services/__init__.py',
-  'services/search.py'
+  'services/search.py',
+  'services/model_cache.py',
+  'services/token_counter.py',
+  'services/statistics.py',
+  'services/backup.py',
+  'services/export.py'
 ]
 install_data(services_sources, install_dir: moduledir / 'services')
+
+# Install utils module
+utils_sources = [
+  'utils/__init__.py',
+  'utils/message_virtualization.py',
+  'utils/accessibility.py',
+  'utils/keyboard_navigation.py',
+  'utils/model_utils.py'
+]
+install_data(utils_sources, install_dir: moduledir / 'utils')
 
 subdir('widgets')

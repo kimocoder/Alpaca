@@ -10,6 +10,9 @@ widgets = [
   'welcome.py',
   'preferences.py',
   'global_search.py',
+  'context_indicator.py',
+  'model_comparison.py',
+  'statistics.py',
 ]
 
 install_data(widgets, install_dir: moduledir)
