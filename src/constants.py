@@ -5,6 +5,13 @@ Holds a few constant values that can be re-used all over the application.
 
 import os
 
+# Import translation function with fallback for testing
+try:
+    from gettext import gettext as _
+except ImportError:
+    def _(s):
+        return s
+
 # Big thanks to everyone contributing translations.
 # These translators will be shown inside of the app under
 # "About Alpaca" > "Contributors".
@@ -288,6 +295,15 @@ CODE_LANGUAGE_PROPERTIES = (
 
 # UI Constants for search highlighting
 HIGHLIGHT_ALPHA = '30%'  # Background alpha for search highlights
+
+# Keyboard Shortcuts
+SHORTCUTS = {
+    'regenerate_message': '<primary>r',
+    'copy_last_response': '<primary><shift>c',
+    'toggle_tts': '<primary>t',
+    'cycle_model': '<primary><shift>m',
+    'global_search': '<primary><shift>f',
+}
 
 # The identifier when inside the Flatpak runtime
 IN_FLATPAK = bool(os.getenv("FLATPAK_ID"))

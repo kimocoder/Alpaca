@@ -16,11 +16,6 @@ $AdwShortcutsDialog shortcuts_dialog {
     }
 
     Adw.ShortcutsItem {
-      title: C_("shortcut window", "Quick Ask");
-      action-name: "app.start_quick_ask";
-    }
-
-    Adw.ShortcutsItem {
       title: C_("shortcut window", "Model Manager");
       action-name: "app.model_manager";
     }
@@ -60,6 +55,11 @@ $AdwShortcutsDialog shortcuts_dialog {
     }
 
     Adw.ShortcutsItem {
+      title: C_("shortcut window", "Create Folder");
+      action-name: "app.new_folder";
+    }
+
+    Adw.ShortcutsItem {
       title: C_("shortcut window", "Delete Chat");
       action-name: "app.delete_current_chat";
     }
@@ -72,6 +72,35 @@ $AdwShortcutsDialog shortcuts_dialog {
     Adw.ShortcutsItem {
       title: C_("shortcut window", "Toggle Searchbars");
       action-name: "app.toggle_search";
+    }
+
+    Adw.ShortcutsItem {
+      title: C_("shortcut window", "Global Search");
+      action-name: "app.global_search";
+    }
+  }
+
+  Adw.ShortcutsSection {
+    title: C_("shortcut window", "Message Actions");
+
+    Adw.ShortcutsItem {
+      title: C_("shortcut window", "Regenerate Last Message");
+      action-name: "app.regenerate_message";
+    }
+
+    Adw.ShortcutsItem {
+      title: C_("shortcut window", "Copy Last Response");
+      action-name: "app.copy_last_response";
+    }
+
+    Adw.ShortcutsItem {
+      title: C_("shortcut window", "Toggle TTS");
+      action-name: "app.toggle_tts";
+    }
+
+    Adw.ShortcutsItem {
+      title: C_("shortcut window", "Cycle Model");
+      action-name: "app.cycle_model";
     }
   }
 
@@ -107,6 +136,35 @@ $AdwShortcutsDialog shortcuts_dialog {
     Adw.ShortcutsItem {
       title: _("Send Message as User");
       accelerator: "Return";
+    }
+  }
+
+  Adw.ShortcutsSection {
+    title: C_("shortcut window", "Features");
+
+    Adw.ShortcutsItem {
+      title: C_("shortcut window", "Quick Ask");
+      action-name: "app.start_quick_ask";
+    }
+
+    Adw.ShortcutsItem {
+      title: C_("shortcut window", "Statistics Dashboard");
+      action-name: "app.statistics_dashboard";
+    }
+
+    Adw.ShortcutsItem {
+      title: C_("shortcut window", "Bookmarks");
+      action-name: "app.show_bookmarks";
+    }
+
+    Adw.ShortcutsItem {
+      title: C_("shortcut window", "Prompt Library");
+      action-name: "app.show_prompt_library";
+    }
+
+    Adw.ShortcutsItem {
+      title: C_("shortcut window", "Backup");
+      action-name: "app.show_backup";
     }
   }
 }
