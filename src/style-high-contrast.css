@@ -1,0 +1,213 @@
+/* High Contrast Theme Support for Alpaca */
+/* This stylesheet provides enhanced contrast ratios for accessibility */
+/* Applied when GTK high contrast mode is enabled */
+
+/* Ensure minimum 7:1 contrast ratio for normal text (WCAG AAA) */
+/* Ensure minimum 4.5:1 contrast ratio for large text (WCAG AA) */
+
+/* Override low-contrast elements */
+.category_pill {
+  padding: 5px 10px;
+  border-radius: 9999px;
+  /* Increase contrast from 0.9 to 0.7 for better visibility */
+  background-color: mix(var(--window-fg-color), var(--window-bg-color), 0.7);
+  border: 1px solid mix(var(--window-fg-color), var(--window-bg-color), 0.5);
+}
+
+.category_pill.circle {
+  border-radius: 100%;
+  padding: 10px 10px;
+}
+
+.category_pill.success {
+  /* Increase contrast for success state */
+  background-color: mix(var(--success-bg-color), var(--window-bg-color), 0.6);
+  border: 2px solid var(--success-bg-color);
+  color: var(--success-fg-color);
+}
+
+.category_pill.error {
+  /* Increase contrast for error state */
+  background-color: mix(var(--error-bg-color), var(--window-bg-color), 0.6);
+  border: 2px solid var(--error-bg-color);
+  color: var(--error-fg-color);
+}
+
+.category_pill.warning {
+  /* Increase contrast for warning state */
+  background-color: mix(var(--warning-bg-color), var(--window-bg-color), 0.6);
+  border: 2px solid var(--warning-bg-color);
+  color: var(--warning-fg-color);
+}
+
+.category_pill.accent {
+  /* Increase contrast for accent state */
+  background-color: mix(var(--accent-bg-color), var(--window-bg-color), 0.6);
+  border: 2px solid var(--accent-bg-color);
+  color: var(--accent-fg-color);
+}
+
+.category_pill.brown {
+  /* Increase contrast for brown state */
+  background-color: mix(var(--brown-2), var(--window-bg-color), 0.6);
+  border: 2px solid var(--brown-2);
+}
+
+.brown {
+  /* Increase contrast from 0.4 to 0.2 for better visibility */
+  color: mix(var(--brown-1), var(--window-fg-color), 0.2);
+}
+
+/* Folder colors with enhanced contrast */
+.folder-blue headerbar, row.folder-blue {
+  background-color: color-mix(in srgb, var(--accent-blue) 40%, transparent);
+  color: color-mix(in srgb, var(--accent-blue) 30%, currentColor);
+  border: 1px solid var(--accent-blue);
+}
+
+.folder-teal headerbar, row.folder-teal {
+  background-color: color-mix(in srgb, var(--accent-teal) 40%, transparent);
+  color: color-mix(in srgb, var(--accent-teal) 30%, currentColor);
+  border: 1px solid var(--accent-teal);
+}
+
+.folder-green headerbar, row.folder-green {
+  background-color: color-mix(in srgb, var(--accent-green) 40%, transparent);
+  color: color-mix(in srgb, var(--accent-green) 30%, currentColor);
+  border: 1px solid var(--accent-green);
+}
+
+.folder-yellow headerbar, row.folder-yellow {
+  background-color: color-mix(in srgb, var(--accent-yellow) 40%, transparent);
+  color: color-mix(in srgb, var(--accent-yellow) 30%, currentColor);
+  border: 1px solid var(--accent-yellow);
+}
+
+.folder-orange headerbar, row.folder-orange {
+  background-color: color-mix(in srgb, var(--accent-orange) 40%, transparent);
+  color: color-mix(in srgb, var(--accent-orange) 30%, currentColor);
+  border: 1px solid var(--accent-orange);
+}
+
+.folder-red headerbar, row.folder-red {
+  background-color: color-mix(in srgb, var(--accent-red) 40%, transparent);
+  color: color-mix(in srgb, var(--accent-red) 30%, currentColor);
+  border: 1px solid var(--accent-red);
+}
+
+.folder-pink headerbar, row.folder-pink {
+  background-color: color-mix(in srgb, var(--accent-pink) 40%, transparent);
+  color: color-mix(in srgb, var(--accent-pink) 30%, currentColor);
+  border: 1px solid var(--accent-pink);
+}
+
+.folder-purple headerbar, row.folder-purple {
+  background-color: color-mix(in srgb, var(--accent-purple) 40%, transparent);
+  color: color-mix(in srgb, var(--accent-purple) 30%, currentColor);
+  border: 1px solid var(--accent-purple);
+}
+
+.folder-slate headerbar, row.folder-slate {
+  background-color: color-mix(in srgb, var(--accent-slate) 40%, transparent);
+  color: color-mix(in srgb, var(--accent-slate) 30%, currentColor);
+  border: 1px solid var(--accent-slate);
+}
+
+/* Context indicator with enhanced contrast */
+.context-indicator {
+  padding: 4px 8px;
+  border-radius: 6px;
+  /* Increase contrast from 0.05 to 0.15 */
+  background-color: alpha(@window_fg_color, 0.15);
+  border: 1px solid alpha(@window_fg_color, 0.3);
+  font-size: 0.9em;
+}
+
+.context-indicator.warning {
+  /* Increase contrast from 0.15 to 0.25 */
+  background-color: alpha(@warning_color, 0.25);
+  color: @warning_color;
+  border: 2px solid @warning_color;
+  font-weight: bold;
+}
+
+/* Code blocks with enhanced borders */
+.code_block:focus, .tts_message {
+  /* Add stronger border for better visibility */
+  box-shadow: 0 0 2px 3px mix(@accent_color, @window_bg_color, 0.4);
+  border: 1px solid @accent_color;
+}
+
+.tts_message_loading {
+  border-radius: 10px;
+  /* Add stronger border for better visibility */
+  box-shadow: 0 0 2px 3px mix(@window_fg_color, @window_bg_color, 0.4);
+  border: 1px solid @window_fg_color;
+}
+
+/* Ensure text has sufficient contrast */
+.message > box {
+  padding: 5px 5px 5px 5px;
+}
+
+.user_message label, .response_message > label, .response_message textview {
+  padding: 5px;
+  /* Ensure text is fully opaque for maximum contrast */
+  opacity: 1.0;
+}
+
+/* Button contrast improvements */
+button {
+  /* Ensure buttons have visible borders in high contrast */
+  border: 1px solid alpha(@window_fg_color, 0.3);
+}
+
+button:hover {
+  border: 1px solid alpha(@window_fg_color, 0.5);
+}
+
+button:active, button:checked {
+  border: 2px solid @accent_color;
+}
+
+/* Focus indicators with high contrast */
+*:focus {
+  outline: 2px solid @accent_color;
+  outline-offset: 2px;
+}
+
+/* Ensure sufficient contrast for links and interactive elements */
+link {
+  color: @accent_color;
+  text-decoration: underline;
+}
+
+link:visited {
+  color: mix(@accent_color, @window_fg_color, 0.7);
+}
+
+/* Enhanced contrast for disabled elements */
+*:disabled {
+  opacity: 0.5;
+  /* Add visual indicator that element is disabled */
+  text-decoration: line-through;
+}
+
+/* Ensure search highlights are visible */
+.message_text_view text selection {
+  background-color: @accent_color;
+  color: @window_bg_color;
+}
+
+/* Loading states with better visibility */
+.loading_image {
+  filter: blur(10px) brightness(70%);
+  border: 2px solid @window_fg_color;
+}
+
+/* Ensure sufficient contrast for generating text shadow */
+.generating_text_shadow {
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0) 0%, var(--window-bg-color) 100%);
+  /* Add a subtle border to improve visibility */
+  border-top: 1px solid alpha(@window_fg_color, 0.2);
+}

@@ -224,3 +224,62 @@ flowboxchild {
   color: var(--accent-slate);
 }
 
+
+/* Context indicator styling */
+.context-indicator {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background-color: alpha(@window_fg_color, 0.05);
+  font-size: 0.9em;
+}
+
+.context-indicator.warning {
+  background-color: alpha(@warning_color, 0.15);
+  color: @warning_color;
+}
+
+/* Keyboard focus indicators */
+*:focus {
+  outline: 2px solid @accent_color;
+  outline-offset: 2px;
+}
+
+/* Enhanced focus for buttons */
+button:focus {
+  outline: 2px solid @accent_color;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px alpha(@accent_color, 0.2);
+}
+
+/* Enhanced focus for entries */
+entry:focus, searchentry:focus, textview:focus {
+  outline: 2px solid @accent_color;
+  outline-offset: 0px;
+  box-shadow: 0 0 0 3px alpha(@accent_color, 0.15);
+}
+
+/* Focus for list items */
+row:focus, flowboxchild:focus {
+  outline: 2px solid @accent_color;
+  outline-offset: -2px;
+  background-color: alpha(@accent_color, 0.1);
+}
+
+/* Custom keyboard focus class for widgets */
+.keyboard-focus {
+  outline: 2px solid @accent_color;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px alpha(@accent_color, 0.2);
+}
+
+/* Skip to content link (hidden until focused) */
+.skip-to-content {
+  position: absolute;
+  left: -9999px;
+  z-index: 999;
+}
+
+.skip-to-content:focus {
+  position: static;
+  left: auto;
+}
