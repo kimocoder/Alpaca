@@ -12,6 +12,10 @@ template $AlpacaGlobalActionStack: Gtk.Stack {
         "accent",
         "br0"
       ]
+      
+      accessibility {
+        label: _("Send message");
+      }
 
       Gtk.GestureClick {
         button: 3;
@@ -33,6 +37,10 @@ template $AlpacaGlobalActionStack: Gtk.Stack {
         "destructive-action",
         "br0"
       ]
+      
+      accessibility {
+        label: _("Stop generation");
+      }
     };
   }
 }

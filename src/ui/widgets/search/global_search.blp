@@ -16,6 +16,10 @@ template $AlpacaGlobalSearch: Adw.Dialog {
         icon-name: "go-previous-symbolic";
         tooltip-text: _("Close");
         clicked => $on_close();
+        
+        accessibility {
+          label: _("Close search");
+        }
       }
     }
 
@@ -26,6 +30,10 @@ template $AlpacaGlobalSearch: Adw.Dialog {
         placeholder-text: _("Search messages...");
         search-changed => $on_search_changed();
         activate => $on_search_activate();
+        
+        accessibility {
+          label: _("Search messages across all chats");
+        }
       };
       key-capture-widget: results_stack;
     }
@@ -63,6 +71,10 @@ template $AlpacaGlobalSearch: Adw.Dialog {
             activate-on-single-click: true;
             row-activated => $on_result_activated();
             styles ["boxed-list"]
+            
+            accessibility {
+              label: _("Search results");
+            }
           }
         };
       }

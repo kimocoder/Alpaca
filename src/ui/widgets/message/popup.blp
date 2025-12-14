@@ -14,6 +14,10 @@ template $AlpacaMessagePopup: Gtk.Popover {
       styles [
         "flat"
       ]
+      
+      accessibility {
+        label: _("Delete message");
+      }
     }
 
     Gtk.Button copy_button {
@@ -25,6 +29,10 @@ template $AlpacaMessagePopup: Gtk.Popover {
       styles [
         "flat"
       ]
+      
+      accessibility {
+        label: _("Copy message");
+      }
     }
 
     Gtk.Button edit_button {
@@ -36,6 +44,10 @@ template $AlpacaMessagePopup: Gtk.Popover {
       styles [
         "flat"
       ]
+      
+      accessibility {
+        label: _("Edit message");
+      }
     }
 
     Gtk.Button regenerate_button {
@@ -47,6 +59,10 @@ template $AlpacaMessagePopup: Gtk.Popover {
       styles [
         "flat"
       ]
+      
+      accessibility {
+        label: _("Regenerate message");
+      }
     }
 
     $AlpacaDictateButton tts_button {}

@@ -33,6 +33,10 @@ template $AlpacaActivityManager: Adw.Bin {
               icon-name: "list-add-symbolic";
               tooltip-text: _("Create Activity");
               clicked => $open_launcher();
+              
+              accessibility {
+                label: _("Create new activity");
+              }
             }
           }
         };
