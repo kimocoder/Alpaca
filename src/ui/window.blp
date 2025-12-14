@@ -151,6 +151,27 @@ template $AlpacaWindow: Adw.ApplicationWindow {
                 }
 
                 [end]
+                Box context_indicator_box {
+                  orientation: horizontal;
+                  spacing: 6;
+                  halign: end;
+                  valign: center;
+                  visible: true;
+
+                  Image {
+                    icon-name: "document-text-symbolic";
+                  }
+
+                  Label context_indicator_label {
+                    label: "0 tokens";
+                  }
+
+                  styles [
+                    "context-indicator",
+                  ]
+                }
+
+                [end]
                 Stack show_activities_stack {
                   StackPage {
                     name: "toggle";
@@ -519,6 +540,35 @@ menu primary_menu {
     item {
       label: _("Manage Models");
       action: "app.model_manager";
+    }
+  }
+
+  section {
+    item {
+      label: _("Search All Chats");
+      action: "app.global_search";
+    }
+
+    item {
+      label: _("Bookmarks");
+      action: "app.show_bookmarks";
+    }
+
+    item {
+      label: _("Prompt Library");
+      action: "app.show_prompt_library";
+    }
+  }
+
+  section {
+    item {
+      label: _("Statistics");
+      action: "app.statistics_dashboard";
+    }
+
+    item {
+      label: _("Backup & Restore");
+      action: "app.show_backup";
     }
   }
 

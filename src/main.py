@@ -177,6 +177,9 @@ class AlpacaApplication(Adw.Application):
         self.main_alpaca_window = AlpacaWindow(application=self)
         self.run_arguments()
 
+        # Setup high contrast theme support
+        self._setup_high_contrast_support()
+
         if sys.platform == 'darwin': # MacOS
             settings = Gtk.Settings.get_default()
             if settings:
@@ -189,6 +192,70 @@ class AlpacaApplication(Adw.Application):
             settings = Gtk.Settings.get_default()
             if settings:
                 settings.set_property('gtk-font-name', 'Segoe UI')
+    
+    def _setup_high_contrast_support(self):
+        """
+        Setup high contrast theme support by detecting system settings
+        and loading appropriate CSS.
+        """
+        # Get GTK settings to detect high contrast mode
+        settings = Gtk.Settings.get_default()
+        
+        if settings:
+            # Check if high contrast is enabled
+            # GTK uses gtk-theme-name property, high contrast themes typically have "HighContrast" in the name
+            theme_name = settings.get_property('gtk-theme-name')
+            is_high_contrast = 'HighContrast' in theme_name if theme_name else False
+            
+            # Also check for gtk-application-prefer-dark-theme
+            prefer_dark = settings.get_property('gtk-application-prefer-dark-theme')
+            
+            # Load high contrast CSS if needed
+            if is_high_contrast:
+                self._load_high_contrast_css()
+                logger.info("High contrast mode detected, loading enhanced contrast styles")
+            
+            # Monitor for theme changes
+            settings.connect('notify::gtk-theme-name', self._on_theme_changed)
+    
+    def _on_theme_changed(self, settings, param):
+        """
+        Handle theme changes to dynamically load/unload high contrast CSS.
+        
+        Args:
+            settings: GTK Settings object
+            param: The parameter that changed
+        """
+        theme_name = settings.get_property('gtk-theme-name')
+        is_high_contrast = 'HighContrast' in theme_name if theme_name else False
+        
+        if is_high_contrast:
+            self._load_high_contrast_css()
+            logger.info("Switched to high contrast theme")
+        else:
+            self._unload_high_contrast_css()
+            logger.info("Switched away from high contrast theme")
+    
+    def _load_high_contrast_css(self):
+        """Load the high contrast CSS stylesheet."""
+        if not hasattr(self, '_high_contrast_provider'):
+            self._high_contrast_provider = Gtk.CssProvider()
+            self._high_contrast_provider.load_from_resource('/com/jeffser/Alpaca/style-high-contrast.css')
+            
+            Gtk.StyleContext.add_provider_for_display(
+                self.main_alpaca_window.get_display(),
+                self._high_contrast_provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            )
+    
+    def _unload_high_contrast_css(self):
+        """Unload the high contrast CSS stylesheet."""
+        if hasattr(self, '_high_contrast_provider'):
+            Gtk.StyleContext.remove_provider_for_display(
+                self.main_alpaca_window.get_display(),
+                self._high_contrast_provider
+            )
+            delattr(self, '_high_contrast_provider')
 
     def on_about_action(self, widget, a):
         current_year = str(datetime.now().year)

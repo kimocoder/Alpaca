@@ -31,6 +31,7 @@ from gi.repository import Adw, Gtk, Gdk, GLib, GtkSource, Gio, Spelling
 from .sql_manager import generate_uuid, generate_numbered_name, prettify_model_name, Instance as SQL
 from . import widgets as Widgets
 from .constants import data_dir, source_dir, cache_dir, HIGHLIGHT_ALPHA
+from .utils import keyboard_navigation
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,8 @@ class AlpacaWindow(Adw.ApplicationWindow):
     last_breakpoint_status = False
 
     chat_searchbar = Gtk.Template.Child()
+    context_indicator_box = Gtk.Template.Child()
+    context_indicator_label = Gtk.Template.Child()
 
     @Gtk.Template.Callback()
     def explore_available_models(self, button):
@@ -353,6 +356,9 @@ class AlpacaWindow(Adw.ApplicationWindow):
 
         buffer.set_text("", 0)
 
+        # Update context indicator after adding user message
+        self.schedule_context_indicator_update()
+
         if mode==0:
             m_element_bot = Widgets.message.Message(
                 dt=datetime.now(),
@@ -449,6 +455,312 @@ class AlpacaWindow(Adw.ApplicationWindow):
         """Show the global search dialog"""
         search_dialog = Widgets.global_search.GlobalSearch()
         search_dialog.present(self)
+    
+    def show_statistics_dashboard(self):
+        """Show the statistics dashboard dialog"""
+        statistics_dialog = Widgets.statistics.StatisticsDashboard()
+        statistics_dialog.present(self)
+    
+    def show_bookmarks(self):
+        """Show the bookmarks dialog"""
+        # TODO: Implement bookmarks dialog (Task 17-19)
+        Widgets.dialog.show_toast(_("Bookmarks feature coming soon"), self)
+    
+    def show_prompt_library(self):
+        """Show the prompt library dialog"""
+        # TODO: Implement prompt library dialog (Task 24-28)
+        Widgets.dialog.show_toast(_("Prompt Library feature coming soon"), self)
+    
+    def show_backup(self):
+        """Show the backup & restore preferences"""
+        preferences_dialog = Widgets.preferences.PreferencesDialog()
+        preferences_dialog.present(self)
+        # Navigate to backup page
+        GLib.idle_add(preferences_dialog.set_visible_page, preferences_dialog.backup_page)
+    
+    def regenerate_last_message(self):
+        """Regenerate the last AI message in the current chat"""
+        current_chat = self.chat_bin.get_child()
+        if not current_chat:
+            Widgets.dialog.show_toast(_("No active chat"), self)
+            return
+        
+        # Get all messages in the chat
+        messages = list(current_chat.container)
+        if not messages:
+            Widgets.dialog.show_toast(_("No messages to regenerate"), self)
+            return
+        
+        # Find the last AI message (mode=1)
+        last_ai_message = None
+        for message in reversed(messages):
+            if hasattr(message, 'mode') and message.mode == 1:
+                last_ai_message = message
+                break
+        
+        if not last_ai_message:
+            Widgets.dialog.show_toast(_("No AI messages to regenerate"), self)
+            return
+        
+        # Trigger regeneration
+        if hasattr(last_ai_message, 'popup') and hasattr(last_ai_message.popup, 'regenerate_message'):
+            last_ai_message.popup.regenerate_message()
+        else:
+            Widgets.dialog.show_toast(_("Cannot regenerate this message"), self)
+    
+    def copy_last_response(self):
+        """Copy the last AI response to clipboard"""
+        current_chat = self.chat_bin.get_child()
+        if not current_chat:
+            Widgets.dialog.show_toast(_("No active chat"), self)
+            return
+        
+        # Get all messages in the chat
+        messages = list(current_chat.container)
+        if not messages:
+            Widgets.dialog.show_toast(_("No messages to copy"), self)
+            return
+        
+        # Find the last AI message (mode=1)
+        last_ai_message = None
+        for message in reversed(messages):
+            if hasattr(message, 'mode') and message.mode == 1:
+                last_ai_message = message
+                break
+        
+        if not last_ai_message:
+            Widgets.dialog.show_toast(_("No AI messages to copy"), self)
+            return
+        
+        # Copy to clipboard
+        if hasattr(last_ai_message, 'get_content'):
+            clipboard = Gdk.Display().get_default().get_clipboard()
+            clipboard.set(last_ai_message.get_content())
+            Widgets.dialog.show_toast(_("Last response copied to clipboard"), self)
+        else:
+            Widgets.dialog.show_toast(_("Cannot copy this message"), self)
+    
+    def toggle_tts_last_message(self):
+        """Toggle TTS for the last AI message"""
+        current_chat = self.chat_bin.get_child()
+        if not current_chat:
+            Widgets.dialog.show_toast(_("No active chat"), self)
+            return
+        
+        # Get all messages in the chat
+        messages = list(current_chat.container)
+        if not messages:
+            Widgets.dialog.show_toast(_("No messages available"), self)
+            return
+        
+        # Find the last AI message (mode=1)
+        last_ai_message = None
+        for message in reversed(messages):
+            if hasattr(message, 'mode') and message.mode == 1:
+                last_ai_message = message
+                break
+        
+        if not last_ai_message:
+            Widgets.dialog.show_toast(_("No AI messages available"), self)
+            return
+        
+        # Toggle TTS button
+        if hasattr(last_ai_message, 'popup') and hasattr(last_ai_message.popup, 'tts_button'):
+            tts_button = last_ai_message.popup.tts_button
+            if hasattr(tts_button, 'button'):
+                # It's a stack with a button inside
+                tts_button.button.set_active(not tts_button.button.get_active())
+            else:
+                # It's a direct button
+                tts_button.set_active(not tts_button.get_active())
+        else:
+            Widgets.dialog.show_toast(_("TTS not available for this message"), self)
+    
+    def cycle_model(self):
+        """Cycle through available models in the model selector"""
+        model_selector = self.global_footer.model_selector
+        if not model_selector:
+            Widgets.dialog.show_toast(_("Model selector not available"), self)
+            return
+        
+        # Get the current selection
+        current_index = model_selector.selector.get_selected()
+        
+        # Get the model list
+        model_list = Widgets.models.added.model_selector_model
+        if not model_list or len(list(model_list)) == 0:
+            Widgets.dialog.show_toast(_("No models available"), self)
+            return
+        
+        # Calculate next index (wrap around)
+        next_index = (current_index + 1) % len(list(model_list))
+        
+        # Set the new selection
+        model_selector.selector.set_selected(next_index)
+        
+        # Show toast with the new model name
+        selected_item = model_selector.get_selected_item()
+        if selected_item and hasattr(selected_item, 'model'):
+            model_name = selected_item.model.get_name()
+            Widgets.dialog.show_toast(_("Switched to model: {}").format(model_name), self)
+
+    def update_context_indicator(self, chat=None):
+        """
+        Update the context indicator with token count from the current chat.
+        
+        Args:
+            chat: The chat to get token count from. If None, uses current chat.
+        """
+        if chat is None:
+            chat = self.chat_bin.get_child()
+        
+        if not chat:
+            self.context_indicator_label.set_text('0 tokens')
+            self.context_indicator_box.remove_css_class('warning')
+            self._hide_context_warning_banner()
+            return
+        
+        try:
+            from .services.token_counter import count_chat_tokens, get_token_stats
+            
+            # Get token count from chat
+            token_count = count_chat_tokens(chat)
+            
+            # Get the model's context limit from the current instance
+            context_limit = self._get_model_context_limit()
+            
+            # Format the display
+            if token_count >= 1000000:
+                display_text = f'{token_count / 1000000:.1f}M tokens'
+            elif token_count >= 1000:
+                display_text = f'{token_count / 1000:.1f}K tokens'
+            else:
+                display_text = f'{token_count} tokens'
+            
+            self.context_indicator_label.set_text(display_text)
+            
+            # Calculate usage percentage
+            usage_percentage = (token_count / context_limit * 100) if context_limit > 0 else 0
+            
+            # Update tooltip with more details
+            stats = get_token_stats(chat)
+            tooltip = _(
+                'Context window usage\n'
+                'Total tokens: {total} / {limit} ({percentage:.1f}%)\n'
+                'Messages: {count}\n'
+                'Avg per message: {avg:.1f}'
+            ).format(
+                total=token_count,
+                limit=context_limit,
+                percentage=usage_percentage,
+                count=stats['message_count'],
+                avg=stats['avg_tokens_per_message']
+            )
+            self.context_indicator_box.set_tooltip_text(tooltip)
+            
+            # Add warning class and show banner if approaching context limit
+            # Warn at 80% of context limit
+            warning_threshold = context_limit * 0.8
+            
+            if token_count >= warning_threshold:
+                self.context_indicator_box.add_css_class('warning')
+                self._show_context_warning_banner(token_count, context_limit, usage_percentage)
+            else:
+                self.context_indicator_box.remove_css_class('warning')
+                self._hide_context_warning_banner()
+                
+        except Exception as e:
+            logger.warning(f"Error updating context indicator: {e}")
+            self.context_indicator_label.set_text('0 tokens')
+            self.context_indicator_box.remove_css_class('warning')
+            self._hide_context_warning_banner()
+    
+    def _get_model_context_limit(self) -> int:
+        """
+        Get the context window limit for the current model.
+        
+        Returns:
+            The context limit in tokens (defaults to 16384 if not available)
+        """
+        try:
+            current_instance = self.get_current_instance()
+            if current_instance and hasattr(current_instance, 'properties'):
+                # Get num_ctx from instance properties, default to 16384
+                return current_instance.properties.get('num_ctx', 16384)
+        except Exception as e:
+            logger.warning(f"Error getting model context limit: {e}")
+        
+        # Default context limit if we can't determine it
+        return 16384
+    
+    def _show_context_warning_banner(self, token_count: int, context_limit: int, usage_percentage: float):
+        """
+        Show a warning banner when approaching context limit.
+        
+        Args:
+            token_count: Current token count
+            context_limit: Maximum context limit
+            usage_percentage: Percentage of context used
+        """
+        if not hasattr(self, '_context_warning_banner'):
+            # Create the banner if it doesn't exist
+            self._context_warning_banner = Adw.Banner()
+            self._context_warning_banner.set_button_label(_("Start New Chat"))
+            self._context_warning_banner.connect('button-clicked', self._on_context_warning_action)
+            
+            # Insert banner at the top of the chat content
+            chat_content = self.chat_bin.get_parent()
+            if chat_content and isinstance(chat_content, Gtk.Box):
+                # Find the toast overlay position
+                for i, child in enumerate(list(chat_content)):
+                    if isinstance(child, Adw.ToastOverlay):
+                        chat_content.insert_child_after(self._context_warning_banner, None)
+                        break
+        
+        # Update banner message
+        if usage_percentage >= 95:
+            message = _(
+                'Context limit nearly reached ({percentage:.0f}% used). '
+                'Consider starting a new chat to continue the conversation effectively.'
+            ).format(percentage=usage_percentage)
+        else:
+            message = _(
+                'Approaching context limit ({percentage:.0f}% used). '
+                'You may want to start a new chat soon to maintain response quality.'
+            ).format(percentage=usage_percentage)
+        
+        self._context_warning_banner.set_title(message)
+        self._context_warning_banner.set_revealed(True)
+    
+    def _hide_context_warning_banner(self):
+        """Hide the context warning banner."""
+        if hasattr(self, '_context_warning_banner'):
+            self._context_warning_banner.set_revealed(False)
+    
+    def _on_context_warning_action(self, banner):
+        """
+        Handle the action button click on the context warning banner.
+        
+        Args:
+            banner: The banner widget that triggered the action
+        """
+        # Trigger the new chat action
+        self.get_application().lookup_action('new_chat').activate()
+    
+    def schedule_context_indicator_update(self):
+        """
+        Schedule a context indicator update after a short delay.
+        
+        This is useful to batch updates when multiple messages
+        are added in quick succession.
+        """
+        # Use GLib.idle_add to schedule update on next idle cycle
+        GLib.timeout_add(500, self._do_context_indicator_update)
+    
+    def _do_context_indicator_update(self):
+        """Internal method to perform the scheduled update."""
+        self.update_context_indicator()
+        return False  # Don't repeat
 
     def prepare_screenshoter(self):
         #used to take screenshots of widgets for documentation
@@ -464,6 +776,33 @@ class AlpacaWindow(Adw.ApplicationWindow):
             height_request=10,
             content=widget
         ).present()
+
+    def _setup_keyboard_navigation(self):
+        """Set up keyboard navigation enhancements for the main window."""
+        try:
+            # Enhance keyboard navigation for model flowboxes
+            keyboard_navigation.setup_keyboard_navigation_for_flowbox(self.local_model_flowbox)
+            keyboard_navigation.setup_keyboard_navigation_for_flowbox(self.available_model_flowbox)
+            
+            # Enhance keyboard navigation for instance listbox
+            keyboard_navigation.setup_keyboard_navigation_for_list(self.instance_listbox)
+            
+            # Make search entries keyboard accessible
+            keyboard_navigation.make_entry_keyboard_accessible(self.searchentry_models)
+            keyboard_navigation.make_entry_keyboard_accessible(self.searchentry_messages)
+            
+            # Add focus indicators to key buttons
+            keyboard_navigation.add_focus_css_class(self.new_chat_splitbutton)
+            keyboard_navigation.add_focus_css_class(self.model_search_button)
+            keyboard_navigation.add_focus_css_class(self.model_filter_button)
+            
+            # Make context indicator focusable for keyboard users
+            keyboard_navigation.make_widget_keyboard_accessible(self.context_indicator_box)
+            keyboard_navigation.add_focus_css_class(self.context_indicator_box)
+            
+            logger.info("Keyboard navigation enhancements applied successfully")
+        except Exception as e:
+            logger.warning(f"Error setting up keyboard navigation: {e}")
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -487,6 +826,9 @@ class AlpacaWindow(Adw.ApplicationWindow):
         self.model_searchbar.connect('notify::search-mode-enabled', lambda *_: self.model_search_changed(self.searchentry_models))
 
         self.set_focus(self.global_footer.message_text_view)
+        
+        # Set up keyboard navigation enhancements
+        self._setup_keyboard_navigation()
 
         self.settings = Gio.Settings(schema_id="com.jeffser.Alpaca")
         for el in ("default-width", "default-height", "maximized", "hide-on-close"):
@@ -510,6 +852,10 @@ class AlpacaWindow(Adw.ApplicationWindow):
             'toggle_sidebar': [lambda *_: self.split_view_overlay.set_show_sidebar(not self.split_view_overlay.get_show_sidebar()), ['F9']],
             'toggle_search': [lambda *_: self.toggle_searchbar(), ['<primary>f']],
             'global_search': [lambda *_: self.show_global_search(), ['<primary><shift>f']],
+            'show_bookmarks': [lambda *_: self.show_bookmarks()],
+            'show_prompt_library': [lambda *_: self.show_prompt_library()],
+            'statistics_dashboard': [lambda *_: self.show_statistics_dashboard(), ['<primary><shift>s']],
+            'show_backup': [lambda *_: self.show_backup()],
             'model_manager' : [lambda *_: self.push_or_pop('model_manager'), ['<primary>m']],
             'instance_manager' : [lambda *_: self.push_or_pop('instance_manager'), ['<primary>i']],
             'add_model_by_name' : [lambda *i: Widgets.dialog.simple_entry(
@@ -525,7 +871,11 @@ class AlpacaWindow(Adw.ApplicationWindow):
             'model_creator_gguf': [lambda *_: Widgets.models.common.prompt_gguf(self)],
             'preferences': [lambda *_: Widgets.preferences.PreferencesDialog().present(self), ['<primary>comma']],
             'zoom_in': [lambda *_: Widgets.preferences.zoom_in(), ['<primary>plus']],
-            'zoom_out': [lambda *_: Widgets.preferences.zoom_out(), ['<primary>minus']]
+            'zoom_out': [lambda *_: Widgets.preferences.zoom_out(), ['<primary>minus']],
+            'regenerate_message': [lambda *_: self.regenerate_last_message(), ['<primary>r']],
+            'copy_last_response': [lambda *_: self.copy_last_response(), ['<primary><shift>c']],
+            'toggle_tts': [lambda *_: self.toggle_tts_last_message(), ['<primary>t']],
+            'cycle_model': [lambda *_: self.cycle_model(), ['<primary><shift>m']]
         }
         if os.getenv('ALPACA_ENABLE_SCREENSHOT_ACTION', '0') == '1':
             universal_actions['screenshoter'] = [lambda *_: self.prepare_screenshoter(), ['F3']]
