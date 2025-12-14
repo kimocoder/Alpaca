@@ -2,12 +2,20 @@
 
 from gi.repository import Adw, Gtk, Gio, GLib
 import importlib.util, icu, sys, os
+from datetime import datetime
 from ..constants import TTS_VOICES, STT_MODELS, SPEACH_RECOGNITION_LANGUAGES, REMBG_MODELS, IN_FLATPAK
 from . import dialog
 from ..sql_manager import Instance as SQL
+from ..services.backup import BackupService
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/preferences.ui')
 class PreferencesDialog(Adw.PreferencesDialog):
+    """
+    Preferences dialog for configuring application settings.
+    
+    Provides interface for managing general settings, audio preferences,
+    activity configurations, and backup options.
+    """
     __gtype_name__ = 'AlpacaPreferencesDialog'
 
     #GENERAL
@@ -49,6 +57,157 @@ class PreferencesDialog(Adw.PreferencesDialog):
     activity_terminal_flatpak_warning_command = Gtk.Template.Child()
 
     activity_background_remover_default_model = Gtk.Template.Child()
+
+    #BACKUP
+    backup_page = Gtk.Template.Child()
+    backup_auto_group = Gtk.Template.Child()
+    backup_auto_enabled_switch = Gtk.Template.Child()
+    backup_interval_spin = Gtk.Template.Child()
+    backup_path_entry = Gtk.Template.Child()
+    backup_last_backup_row = Gtk.Template.Child()
+
+    @Gtk.Template.Callback()
+    def manual_backup_button_pressed(self, button):
+        """Handle manual backup button press."""
+        file_dialog = Gtk.FileDialog()
+        file_dialog.set_title(_("Save Backup"))
+        file_dialog.set_initial_name(f"alpaca_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db")
+        
+        def on_save_response(dialog, result):
+            try:
+                file = dialog.save_finish(result)
+                if file:
+                    backup_path = file.get_path()
+                    backup_service = BackupService()
+                    
+                    if backup_service.create_backup(backup_path):
+                        self._show_toast(_("Backup created successfully"))
+                        self._update_last_backup_display()
+                    else:
+                        self._show_error_dialog(_("Backup Failed"), _("Failed to create backup. Please check the logs."))
+            except Exception as e:
+                if "dismissed" not in str(e).lower():
+                    self._show_error_dialog(_("Backup Failed"), str(e))
+        
+        file_dialog.save(self.get_root(), None, on_save_response)
+
+    @Gtk.Template.Callback()
+    def restore_backup_button_pressed(self, button):
+        """Handle restore backup button press."""
+        file_dialog = Gtk.FileDialog()
+        file_dialog.set_title(_("Select Backup to Restore"))
+        
+        # Create file filter for database files
+        filter_db = Gtk.FileFilter()
+        filter_db.set_name(_("Database Files"))
+        filter_db.add_pattern("*.db")
+        
+        filter_list = Gio.ListStore.new(Gtk.FileFilter)
+        filter_list.append(filter_db)
+        file_dialog.set_filters(filter_list)
+        
+        def on_open_response(dialog, result):
+            try:
+                file = dialog.open_finish(result)
+                if file:
+                    backup_path = file.get_path()
+                    
+                    # Confirm restore action
+                    def do_restore():
+                        backup_service = BackupService()
+                        
+                        if backup_service.restore_backup(backup_path, merge=True):
+                            self._show_toast(_("Backup restored successfully. Please restart Alpaca."))
+                        else:
+                            self._show_error_dialog(_("Restore Failed"), _("Failed to restore backup. Please check the logs."))
+                    
+                    dialog.simple(
+                        parent=self.get_root(),
+                        heading=_("Restore Backup"),
+                        body=_("This will merge the backup data with your current data. Are you sure you want to continue?"),
+                        callback=do_restore,
+                        button_appearance='suggested'
+                    )
+            except Exception as e:
+                if "dismissed" not in str(e).lower():
+                    self._show_error_dialog(_("Restore Failed"), str(e))
+        
+        file_dialog.open(self.get_root(), None, on_open_response)
+
+    @Gtk.Template.Callback()
+    def choose_backup_directory_pressed(self, button):
+        """Handle choose backup directory button press."""
+        file_dialog = Gtk.FileDialog()
+        file_dialog.set_title(_("Select Backup Directory"))
+        
+        def on_select_response(dialog, result):
+            try:
+                folder = dialog.select_folder_finish(result)
+                if folder:
+                    folder_path = folder.get_path()
+                    self.backup_path_entry.set_text(folder_path)
+                    self.settings.set_string('backup-path', folder_path)
+            except Exception as e:
+                if "dismissed" not in str(e).lower():
+                    print(f"Error selecting folder: {e}")
+        
+        file_dialog.select_folder(self.get_root(), None, on_select_response)
+
+    def _show_toast(self, message):
+        """Show a toast notification."""
+        root = self.get_root()
+        if hasattr(root, 'add_toast'):
+            toast = Adw.Toast.new(message)
+            toast.set_timeout(3)
+            root.add_toast(toast)
+
+    def _show_error_dialog(self, heading, body):
+        """Show an error dialog."""
+        dialog.simple(
+            parent=self.get_root(),
+            heading=heading,
+            body=body,
+            button_appearance='destructive'
+        )
+
+    def _update_last_backup_display(self):
+        """Update the last backup time display."""
+        backup_service = BackupService()
+        schedules = backup_service.list_scheduled_backups()
+        
+        if schedules and schedules[0].get('last_backup'):
+            last_backup = schedules[0]['last_backup']
+            self.backup_last_backup_row.set_subtitle(last_backup.strftime("%Y-%m-%d %H:%M:%S"))
+        else:
+            self.backup_last_backup_row.set_subtitle(_("Never"))
+
+    def _setup_auto_backup(self):
+        """Setup or update automatic backup schedule."""
+        if not self.settings.get_boolean('backup-auto-enabled'):
+            return
+        
+        backup_path = self.settings.get_string('backup-path')
+        if not backup_path:
+            return
+        
+        interval_hours = self.settings.get_int('backup-interval-hours')
+        
+        backup_service = BackupService()
+        
+        # Cancel existing schedules
+        schedules = backup_service.list_scheduled_backups()
+        for schedule in schedules:
+            backup_service.cancel_auto_backup(schedule['id'])
+        
+        # Create new schedule
+        def backup_callback(success, path):
+            if success:
+                GLib.idle_add(self._show_toast, _("Automatic backup created"))
+                GLib.idle_add(self._update_last_backup_display)
+            else:
+                GLib.idle_add(self._show_toast, _("Automatic backup failed"))
+        
+        backup_service.schedule_auto_backup(interval_hours, backup_path, backup_callback)
 
     @Gtk.Template.Callback()
     def zoom_changed(self, spinner):
@@ -168,6 +327,22 @@ class PreferencesDialog(Adw.PreferencesDialog):
             self.activity_background_remover_default_model.get_model().append('{} ({})'.format(m.get('display_name'), m.get('size')))
         self.activity_background_remover_default_model.set_factory(dropdown_factory)
         self.settings.bind('activity-background-remover-model', self.activity_background_remover_default_model, 'selected', Gio.SettingsBindFlags.DEFAULT)
+
+        # BACKUP
+        self.settings.bind('backup-auto-enabled', self.backup_auto_enabled_switch, 'active', Gio.SettingsBindFlags.DEFAULT)
+        self.settings.bind('backup-interval-hours', self.backup_interval_spin, 'value', Gio.SettingsBindFlags.DEFAULT)
+        self.settings.bind('backup-path', self.backup_path_entry, 'text', Gio.SettingsBindFlags.DEFAULT)
+        
+        # Update last backup display
+        self._update_last_backup_display()
+        
+        # Setup auto backup when enabled
+        self.backup_auto_enabled_switch.connect('notify::active', lambda *_: self._setup_auto_backup())
+        self.backup_interval_spin.connect('changed', lambda *_: self._setup_auto_backup())
+        
+        # Initialize auto backup if enabled
+        if self.settings.get_boolean('backup-auto-enabled'):
+            self._setup_auto_backup()
 
 
 def get_zoom():

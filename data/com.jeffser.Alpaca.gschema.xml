@@ -83,5 +83,15 @@
 	  <key name="activity-background-remover-model" type="i">
 	    <default>0</default>
 	  </key>
+
+	  <key name="backup-auto-enabled" type="b">
+	    <default>false</default>
+	  </key>
+	  <key name="backup-interval-hours" type="i">
+	    <default>24</default>
+	  </key>
+	  <key name="backup-path" type="s">
+	    <default>""</default>
+	  </key>
 	</schema>
 </schemalist>

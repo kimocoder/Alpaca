@@ -237,4 +237,81 @@ template $AlpacaPreferencesDialog: Adw.PreferencesDialog {
         }
       }
   }
+
+  Adw.PreferencesPage backup_page {
+    icon-name: "document-save-symbolic";
+    title: _("Backup");
+
+    Adw.PreferencesGroup {
+      title: _("Manual Backup");
+      description: _("Create a backup of all your chats, settings, and data");
+
+      Adw.ActionRow {
+        title: _("Create Backup Now");
+        subtitle: _("Export all data to a backup file");
+        activatable: true;
+        activated => $manual_backup_button_pressed();
+
+        [suffix]
+        Gtk.Image {
+          icon-name: "document-save-symbolic";
+        }
+      }
+
+      Adw.ActionRow {
+        title: _("Restore from Backup");
+        subtitle: _("Import data from a backup file");
+        activatable: true;
+        activated => $restore_backup_button_pressed();
+
+        [suffix]
+        Gtk.Image {
+          icon-name: "document-open-symbolic";
+        }
+      }
+    }
+
+    Adw.PreferencesGroup backup_auto_group {
+      title: _("Automatic Backup");
+      description: _("Schedule automatic backups of your data");
+
+      Adw.SwitchRow backup_auto_enabled_switch {
+        title: _("Enable Automatic Backup");
+        subtitle: _("Automatically create backups on a schedule");
+      }
+
+      Adw.SpinRow backup_interval_spin {
+        title: _("Backup Interval (Hours)");
+        subtitle: _("How often to create automatic backups");
+
+        adjustment: Adjustment {
+          lower: 1;
+          upper: 168;
+          step-increment: 1;
+        };
+      }
+
+      Adw.EntryRow backup_path_entry {
+        title: _("Backup Directory");
+        editable: false;
+      }
+
+      Adw.ActionRow {
+        title: _("Choose Backup Directory");
+        subtitle: _("Select a folder for automatic backups");
+        activatable: true;
+        activated => $choose_backup_directory_pressed();
+
+        [suffix]
+        Gtk.Image {
+          icon-name: "folder-new-symbolic";
+        }
+      }
+
+      Adw.ActionRow backup_last_backup_row {
+        title: _("Last Backup");
+        subtitle: _("Never");
+      }
+    }
+  }
 }
