@@ -20,12 +20,25 @@ class OptionPopup(Gtk.Popover):
     copy_button = Gtk.Template.Child()
     edit_button = Gtk.Template.Child()
     regenerate_button = Gtk.Template.Child()
+    bookmark_button = Gtk.Template.Child()
     tts_button = Gtk.Template.Child()
 
     def change_status(self, status:bool):
         self.delete_button.set_sensitive(status)
         self.edit_button.set_sensitive(status)
         self.regenerate_button.set_sensitive(status)
+    
+    def update_bookmark_button(self):
+        """Update bookmark button icon based on bookmark status"""
+        message_element = self.get_ancestor(Message)
+        if message_element and hasattr(message_element, 'message_id'):
+            is_bookmarked = SQL.is_bookmarked(message_element.message_id)
+            if is_bookmarked:
+                self.bookmark_button.set_icon_name('starred-filled-symbolic')
+                self.bookmark_button.set_tooltip_text(_('Remove Bookmark'))
+            else:
+                self.bookmark_button.set_icon_name('starred-symbolic')
+                self.bookmark_button.set_tooltip_text(_('Bookmark Message'))
 
     @Gtk.Template.Callback()
     def delete_message(self, button=None):
@@ -101,6 +114,32 @@ class OptionPopup(Gtk.Popover):
             message_element.main_stack.set_visible_child_name('loading')
         else:
             dialog.show_toast(_("Message cannot be regenerated while receiving a response"), self.get_root())
+
+    @Gtk.Template.Callback()
+    def toggle_bookmark(self, button=None):
+        """Toggle bookmark status for the message"""
+        message_element = self.get_ancestor(Message)
+        if not message_element or not hasattr(message_element, 'message_id'):
+            return
+        
+        message_id = message_element.message_id
+        is_bookmarked = SQL.is_bookmarked(message_id)
+        
+        if is_bookmarked:
+            # Remove bookmark
+            success = SQL.remove_bookmark(message_id)
+            if success:
+                self.bookmark_button.set_icon_name('starred-symbolic')
+                self.bookmark_button.set_tooltip_text(_('Bookmark Message'))
+                message_element.update_bookmark_indicator()
+                dialog.show_toast(_("Bookmark removed"), self.get_root())
+        else:
+            # Add bookmark
+            SQL.add_bookmark(message_id)
+            self.bookmark_button.set_icon_name('starred-filled-symbolic')
+            self.bookmark_button.set_tooltip_text(_('Remove Bookmark'))
+            message_element.update_bookmark_indicator()
+            dialog.show_toast(_("Message bookmarked"), self.get_root())
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/message/block_container.ui')
 class BlockContainer(Gtk.Box):
@@ -203,6 +242,7 @@ class Message(Gtk.Box):
         self.dt = dt
         self.option_button = None
         self.message_id = message_id
+        self.bookmark_indicator = None
 
         super().__init__()
         self.popup = OptionPopup()
@@ -216,6 +256,7 @@ class Message(Gtk.Box):
             self.block_container.set_css_classes(['dim-label'])
 
         self.update_profile_picture()
+        self.update_bookmark_indicator()
 
     def get_content(self) -> str:
         return ''.join(self.block_container.get_content())
@@ -287,6 +328,36 @@ class Message(Gtk.Box):
         self.update_header(
             pfp_b64=SQL.get_model_preferences(self.get_model()).get('picture')
         )
+    
+    def update_bookmark_indicator(self):
+        """Update the visual bookmark indicator"""
+        if not hasattr(self, 'message_id') or self.message_id == -1:
+            return
+        
+        is_bookmarked = SQL.is_bookmarked(self.message_id)
+        
+        # Remove existing indicator if present
+        if self.bookmark_indicator and self.bookmark_indicator.get_parent():
+            self.bookmark_indicator.unparent()
+            self.bookmark_indicator = None
+        
+        # Add indicator if bookmarked
+        if is_bookmarked:
+            self.bookmark_indicator = Gtk.Image.new_from_icon_name('starred-filled-symbolic')
+            self.bookmark_indicator.set_pixel_size(16)
+            self.bookmark_indicator.set_margin_end(6)
+            self.bookmark_indicator.set_tooltip_text(_('Bookmarked'))
+            self.bookmark_indicator.add_css_class('accent')
+            
+            # Add to header label box
+            if self.header_label.get_parent():
+                header_box = self.header_label.get_parent()
+                if isinstance(header_box, Gtk.Box):
+                    header_box.prepend(self.bookmark_indicator)
+        
+        # Update popup button state
+        if hasattr(self, 'popup'):
+            self.popup.update_bookmark_button()
 
     def add_attachment(self, file_id:str, name:str, attachment_type:str, content:str):
         if attachment_type == 'image':

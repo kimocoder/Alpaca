@@ -49,6 +49,17 @@ template $AlpacaMessagePopup: Gtk.Popover {
       ]
     }
 
+    Gtk.Button bookmark_button {
+      halign: start;
+      hexpand: true;
+      icon-name: "starred-symbolic";
+      tooltip-text: _("Bookmark Message");
+      clicked => $toggle_bookmark();
+      styles [
+        "flat"
+      ]
+    }
+
     $AlpacaDictateButton tts_button {}
   };
 }
