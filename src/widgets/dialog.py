@@ -5,6 +5,15 @@ Handles all dialogs
 
 import gi
 from gi.repository import Gtk, Gio, Adw, GLib
+from ..utils.keyboard_navigation import (
+    setup_escape_key_handler,
+    make_entry_keyboard_accessible,
+    add_focus_css_class
+)
+import logging
+from gettext import gettext as _
+
+logger = logging.getLogger(__name__)
 
 button_appearance={
     'suggested': Adw.ResponseAppearance.SUGGESTED,
@@ -13,11 +22,17 @@ button_appearance={
 
 def get_dialog_showing(parent:Gtk.Widget) -> bool:
     if parent:
-        return any([True for dt in (Options, Entry, DropDown) if isinstance(parent.get_visible_dialog(), dt)])
+        return any([True for dt in (Options, Entry, DropDown, RadioButton) if isinstance(parent.get_visible_dialog(), dt)])
     return False
 
 # Don't call this directly outside this script
 class Base(Adw.AlertDialog):
+    """
+    Base class for dialog widgets.
+    
+    Provides common functionality for creating alert dialogs with
+    customizable options and responses. Not intended for direct use.
+    """
     __gtype_name__ = 'AlpacaDialogBase'
 
     def __init__(self, heading:str, body:str, close_response:str, options:dict):
@@ -37,6 +52,11 @@ class Base(Adw.AlertDialog):
 
 
 class Options(Base):
+    """
+    Dialog with multiple option buttons.
+    
+    Displays a dialog with customizable buttons and callbacks for user choices.
+    """
     __gtype_name__ = 'AlpacaDialogOptions'
 
     def __init__(self, heading:str, body:str, close_response:str, options:dict):
@@ -54,6 +74,12 @@ class Options(Base):
 
     def show(self, parent:Gtk.Widget):
         if not get_dialog_showing(parent):
+            # Set up keyboard navigation for dialog
+            try:
+                setup_escape_key_handler(self, lambda: self.close())
+            except Exception as e:
+                logger.warning(f"Error setting up keyboard navigation for Options dialog: {e}")
+            
             self.choose(
                 parent = parent,
                 cancellable = None,
@@ -61,6 +87,11 @@ class Options(Base):
             )
 
 class Entry(Base):
+    """
+    Dialog with text entry fields.
+    
+    Displays a dialog with one or more text input fields for user input.
+    """
     __gtype_name__ = 'AlpacaDialogEntry'
 
     def __init__(self, heading:str, body:str, close_response:str, options:dict, entries:list or dict):
@@ -99,6 +130,15 @@ class Entry(Base):
         self.set_extra_child(self.container)
 
         self.connect('realize', lambda *_: list(self.container)[0].grab_focus())
+        
+        # Set up keyboard navigation for entries
+        try:
+            for entry in list(self.container):
+                if isinstance(entry, Gtk.Entry):
+                    make_entry_keyboard_accessible(entry)
+                    add_focus_css_class(entry)
+        except Exception as e:
+            logger.warning(f"Error setting up keyboard navigation for Entry dialog: {e}")
 
     def response(self, result:str):
         self.close()
@@ -113,6 +153,12 @@ class Entry(Base):
 
     def show(self, parent:Gtk.Widget):
         if not get_dialog_showing(parent):
+            # Set up keyboard navigation for dialog
+            try:
+                setup_escape_key_handler(self, lambda: self.close())
+            except Exception as e:
+                logger.warning(f"Error setting up keyboard navigation for Entry dialog: {e}")
+            
             self.choose(
                 parent = parent,
                 cancellable = None,
@@ -120,6 +166,11 @@ class Entry(Base):
             )
 
 class DropDown(Base):
+    """
+    Dialog with a dropdown selection menu.
+    
+    Displays a dialog with a dropdown menu for selecting from multiple options.
+    """
     __gtype_name__ = 'AlpacaDialogDropDown'
 
     def __init__(self, heading:str, body:str, close_response:str, options:dict, items:list):
@@ -151,7 +202,74 @@ class DropDown(Base):
                 callback = lambda dialog, task, dropdown=self.get_extra_child(): self.response(dialog.choose_finish(task), dropdown.get_selected_item().get_string())
             )
 
+class RadioButton(Base):
+    """
+    Dialog with radio button options.
+    
+    Displays a dialog with radio buttons for selecting one option from multiple choices.
+    """
+    __gtype_name__ = 'AlpacaDialogRadioButton'
+
+    def __init__(self, heading:str, body:str, close_response:str, options:dict, radio_options:list):
+        super().__init__(
+            heading,
+            body,
+            close_response,
+            options
+        )
+        
+        self.radio_options = radio_options
+        self.container = Gtk.Box(
+            orientation=1,
+            spacing=10
+        )
+        
+        # Create radio buttons with a group
+        first_button = None
+        for label, value in radio_options:
+            if first_button is None:
+                button = Gtk.CheckButton(label=label)
+                first_button = button
+            else:
+                button = Gtk.CheckButton(label=label, group=first_button)
+            
+            # Store the value in the button's data
+            button.set_data('export_value', value)
+            self.container.append(button)
+        
+        # Set first button as active by default
+        if first_button:
+            first_button.set_active(True)
+        
+        self.set_extra_child(self.container)
+
+    def get_selected_value(self):
+        """Get the value of the currently selected radio button."""
+        for button in list(self.container):
+            if isinstance(button, Gtk.CheckButton) and button.get_active():
+                return button.get_data('export_value')
+        return None
+
+    def response(self, result:str):
+        selected_value = self.get_selected_value()
+        self.close()
+        if 'callback' in self.options.get(result, {}):
+            self.options[result]['callback'](selected_value)
+
+    def show(self, parent:Gtk.Widget):
+        if not get_dialog_showing(parent):
+            self.choose(
+                parent = parent,
+                cancellable = None,
+                callback = lambda dialog, task: self.response(dialog.choose_finish(task))
+            )
+
 class Popover(Gtk.Popover):
+    """
+    Custom popover widget for displaying contextual information.
+    
+    Provides a popover menu with customizable content and positioning.
+    """
     __gtype_name__ = 'AlpacaPopover'
 
     def __init__(self, action_groups:list):
@@ -233,6 +351,19 @@ def simple_dropdown(parent:Gtk.Widget, heading:str, body:str, callback:callable,
     }
 
     dialog = DropDown(heading, body, list(options.keys())[0], options, items)
+    dialog.show(parent)
+
+def simple_radio(parent:Gtk.Widget, heading:str, body:str, callback:callable, radio_options:list, button_name:str=_('Accept'), button_appearance:str='suggested'):
+    options = {
+        _('Cancel'): {},
+        button_name: {
+            'appearance': button_appearance,
+            'callback': callback,
+            'default': True
+        }
+    }
+
+    dialog = RadioButton(heading, body, list(options.keys())[0], options, radio_options)
     dialog.show(parent)
 
 def simple_log(parent:Gtk.Widget, title:str, summary_text:str, summary_classes:list, log_text:str):
