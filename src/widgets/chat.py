@@ -14,6 +14,42 @@ from .message import Message
 logger = logging.getLogger(__name__)
 
 
+@Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/chat/export_dialog.ui')
+class ExportDialog(Adw.Dialog):
+    __gtype_name__ = 'AlpacaExportDialog'
+
+    format_db = Gtk.Template.Child()
+    format_markdown = Gtk.Template.Child()
+    format_markdown_obsidian = Gtk.Template.Child()
+    format_json = Gtk.Template.Child()
+    format_json_metadata = Gtk.Template.Child()
+
+    def __init__(self, chat_widget):
+        super().__init__()
+        self.chat_widget = chat_widget
+
+    @Gtk.Template.Callback()
+    def on_cancel(self, button=None):
+        """Close the dialog without exporting"""
+        self.close()
+
+    @Gtk.Template.Callback()
+    def on_export(self, button=None):
+        """Export the chat in the selected format"""
+        if self.format_db.get_active():
+            self.chat_widget.export_db()
+        elif self.format_markdown.get_active():
+            self.chat_widget.export_md(False)
+        elif self.format_markdown_obsidian.get_active():
+            self.chat_widget.export_md(True)
+        elif self.format_json.get_active():
+            self.chat_widget.export_json(False)
+        elif self.format_json_metadata.get_active():
+            self.chat_widget.export_json(True)
+        
+        self.close()
+
+
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/chat/folder.ui')
 class Folder(Adw.NavigationPage):
     __gtype_name__ = 'AlpacaFolder'
@@ -913,17 +949,6 @@ class ChatRow(Gtk.ListBoxRow):
         file_dialog.save(parent=self.get_root(), cancellable=None, callback=lambda file_dialog, result, temp_path=os.path.join(cache_dir, 'export.json'): self.on_export_chat(file_dialog, result, temp_path))
 
     def prompt_export(self):
-        options = {
-            _("Importable (.db)"): self.export_db,
-            _("Markdown"): lambda: self.export_md(False),
-            _("Markdown (Obsidian Style)"): lambda: self.export_md(True),
-            _("JSON"): lambda: self.export_json(False),
-            _("JSON (Include Metadata)"): lambda: self.export_json(True)
-        }
-        dialog.simple_dropdown(
-            parent = self.get_root(),
-            heading = _("Export Chat"),
-            body = _("Select a method to export the chat"),
-            callback = lambda option, options=options: options[option](),
-            items = options.keys()
-        )
+        """Show the export format selection dialog"""
+        export_dialog = ExportDialog(self)
+        export_dialog.present(self.get_root())

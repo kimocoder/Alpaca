@@ -1,0 +1,78 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $AlpacaExportDialog : Adw.Dialog {
+  title: _("Export Chat");
+  content-width: 400;
+  content-height: 350;
+
+  child: Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {
+      show-title: false;
+
+      [start]
+      Button {
+        label: _("Cancel");
+        clicked => $on_cancel();
+      }
+
+      [end]
+      Button {
+        label: _("Export");
+        clicked => $on_export();
+        styles ["suggested-action"]
+      }
+    }
+
+    content: Gtk.Box {
+      orientation: vertical;
+      spacing: 18;
+      margin-top: 18;
+      margin-bottom: 18;
+      margin-start: 18;
+      margin-end: 18;
+
+      Gtk.Label {
+        label: _("Select Export Format");
+        halign: start;
+        styles ["title-3"]
+      }
+
+      Gtk.Box {
+        orientation: vertical;
+        spacing: 12;
+
+        Gtk.CheckButton format_db {
+          label: _("Database (.db)");
+          tooltip-text: _("Importable database format");
+          active: true;
+        }
+
+        Gtk.CheckButton format_markdown {
+          label: _("Markdown (.md)");
+          tooltip-text: _("Standard Markdown format");
+          group: format_db;
+        }
+
+        Gtk.CheckButton format_markdown_obsidian {
+          label: _("Markdown - Obsidian Style");
+          tooltip-text: _("Markdown optimized for Obsidian");
+          group: format_db;
+        }
+
+        Gtk.CheckButton format_json {
+          label: _("JSON (.json)");
+          tooltip-text: _("JSON format without metadata");
+          group: format_db;
+        }
+
+        Gtk.CheckButton format_json_metadata {
+          label: _("JSON with Metadata");
+          tooltip-text: _("JSON format including timestamps and model names");
+          group: format_db;
+        }
+      }
+    };
+  };
+}
