@@ -1,0 +1,139 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $AlpacaPromptLibrary : Adw.Dialog {
+  title: _("Prompt Library");
+  content-width: 700;
+  content-height: 600;
+
+  child: Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {
+      show-title: false;
+
+      [start]
+      Button {
+        icon-name: "go-previous-symbolic";
+        tooltip-text: _("Close");
+        clicked => $on_close();
+      }
+
+      [end]
+      Box {
+        spacing: 6;
+
+        Button {
+          icon-name: "list-add-symbolic";
+          tooltip-text: _("Add Prompt");
+          clicked => $on_add_prompt();
+        }
+
+        Button {
+          icon-name: "view-refresh-symbolic";
+          tooltip-text: _("Refresh");
+          clicked => $on_refresh();
+        }
+      }
+    }
+
+    [top]
+    Box {
+      orientation: vertical;
+
+      SearchEntry search_entry {
+        placeholder-text: _("Search prompts...");
+        search-changed => $on_search();
+      }
+
+      Box category_box {
+        orientation: horizontal;
+        spacing: 6;
+        margin-start: 12;
+        margin-end: 12;
+        margin-top: 6;
+        margin-bottom: 6;
+
+        Label {
+          label: _("Category:");
+          styles ["dim-label"]
+        }
+
+        DropDown category_dropdown {
+          hexpand: true;
+          notify::selected => $on_category_changed();
+        }
+      }
+    }
+
+    content: Stack prompts_stack {
+      StackPage {
+        name: "loading";
+        child: Box {
+          orientation: vertical;
+          valign: center;
+          halign: center;
+          spacing: 12;
+
+          Spinner {
+            spinning: true;
+            width-request: 32;
+            height-request: 32;
+          }
+
+          Label {
+            label: _("Loading prompts...");
+            styles ["title-3"]
+          }
+        };
+      }
+
+      StackPage {
+        name: "prompts";
+        child: ScrolledWindow {
+          vexpand: true;
+          hscrollbar-policy: never;
+
+          ListBox prompts_listbox {
+            selection-mode: none;
+            activate-on-single-click: false;
+            styles ["boxed-list"]
+          }
+        };
+      }
+
+      StackPage {
+        name: "empty";
+        child: Adw.StatusPage {
+          icon-name: "open-book-symbolic";
+          title: _("No Prompts");
+          description: _("Save frequently used prompts to reuse them later");
+          
+          child: Button {
+            label: _("Add Your First Prompt");
+            halign: center;
+            clicked => $on_add_prompt();
+            styles ["pill", "suggested-action"]
+          };
+        };
+      }
+
+      StackPage {
+        name: "no-results";
+        child: Adw.StatusPage {
+          icon-name: "edit-find-symbolic";
+          title: _("No Results");
+          description: _("Try a different search term or category");
+        };
+      }
+
+      StackPage {
+        name: "error";
+        child: Adw.StatusPage {
+          icon-name: "dialog-error-symbolic";
+          title: _("Error Loading Prompts");
+          description: _("An error occurred while loading your prompts");
+        };
+      }
+    };
+  };
+}

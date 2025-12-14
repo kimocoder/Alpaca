@@ -209,6 +209,13 @@ class Instance:
                     "name": "TEXT NOT NULL",
                     "color": "TEXT",
                     "parent": "TEXT"
+                },
+                "prompt": {
+                    "id": "TEXT NOT NULL PRIMARY KEY",
+                    "name": "TEXT NOT NULL",
+                    "content": "TEXT NOT NULL",
+                    "category": "TEXT",
+                    "created_at": "DATETIME NOT NULL"
                 }
             }
 
@@ -892,3 +899,98 @@ class Instance:
 
         for row in result:
             Instance.remove_folder(row[0])
+
+    #####################
+    ## PROMPT LIBRARY ##
+    #####################
+
+    def save_prompt(name: str, content: str, category: str = None) -> str:
+        """Save a prompt to the library and return its ID."""
+        prompt_id = generate_uuid()
+        with SQLiteConnection() as c:
+            c.cursor.execute(
+                "INSERT INTO prompt (id, name, content, category, created_at) VALUES (?, ?, ?, ?, ?)",
+                (prompt_id, name, content, category, datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S"))
+            )
+        return prompt_id
+
+    def get_prompts(category: str = None) -> list:
+        """Get prompts, optionally filtered by category."""
+        with SQLiteConnection() as c:
+            if category is None:
+                prompts = c.cursor.execute(
+                    "SELECT id, name, content, category, created_at FROM prompt ORDER BY created_at DESC"
+                ).fetchall()
+            else:
+                prompts = c.cursor.execute(
+                    "SELECT id, name, content, category, created_at FROM prompt WHERE category=? ORDER BY created_at DESC",
+                    (category,)
+                ).fetchall()
+        return prompts
+
+    def get_prompt_by_id(prompt_id: str) -> dict:
+        """Get a specific prompt by ID."""
+        with SQLiteConnection() as c:
+            row = c.cursor.execute(
+                "SELECT id, name, content, category, created_at FROM prompt WHERE id=?",
+                (prompt_id,)
+            ).fetchone()
+            if row:
+                return {
+                    'id': row[0],
+                    'name': row[1],
+                    'content': row[2],
+                    'category': row[3],
+                    'created_at': row[4]
+                }
+        return None
+
+    def update_prompt(prompt_id: str, name: str = None, content: str = None, category: str = None) -> bool:
+        """Update an existing prompt."""
+        with SQLiteConnection() as c:
+            existing = c.cursor.execute(
+                "SELECT id FROM prompt WHERE id=?", (prompt_id,)
+            ).fetchone()
+            
+            if not existing:
+                return False
+            
+            if name is not None:
+                c.cursor.execute(
+                    "UPDATE prompt SET name=? WHERE id=?",
+                    (name, prompt_id)
+                )
+            if content is not None:
+                c.cursor.execute(
+                    "UPDATE prompt SET content=? WHERE id=?",
+                    (content, prompt_id)
+                )
+            if category is not None:
+                c.cursor.execute(
+                    "UPDATE prompt SET category=? WHERE id=?",
+                    (category, prompt_id)
+                )
+        return True
+
+    def delete_prompt(prompt_id: str) -> bool:
+        """Delete a prompt by ID."""
+        with SQLiteConnection() as c:
+            result = c.cursor.execute(
+                "SELECT id FROM prompt WHERE id=?", (prompt_id,)
+            ).fetchone()
+            
+            if not result:
+                return False
+            
+            c.cursor.execute(
+                "DELETE FROM prompt WHERE id=?", (prompt_id,)
+            )
+        return True
+
+    def get_prompt_categories() -> list:
+        """Get all unique prompt categories."""
+        with SQLiteConnection() as c:
+            categories = c.cursor.execute(
+                "SELECT DISTINCT category FROM prompt WHERE category IS NOT NULL ORDER BY category"
+            ).fetchall()
+        return [cat[0] for cat in categories]
