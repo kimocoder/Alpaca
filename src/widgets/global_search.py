@@ -11,12 +11,20 @@ from datetime import datetime
 from typing import Optional
 
 from ..services.search import SearchService, SearchResult
+from ..utils.accessibility import configure_search_accessibility, set_accessible_label
+from ..utils import keyboard_navigation
 
 logger = logging.getLogger(__name__)
 
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/search/global_search.ui')
 class GlobalSearch(Adw.Dialog):
+    """
+    Dialog for searching across all chats.
+    
+    Provides a search interface to find messages across all conversations,
+    with support for date filtering and result navigation.
+    """
     __gtype_name__ = 'AlpacaGlobalSearch'
 
     search_bar = Gtk.Template.Child()
@@ -30,8 +38,46 @@ class GlobalSearch(Adw.Dialog):
         self._search_timeout_id = None
         self._current_results = []
         
+        # Configure accessibility
+        self._setup_accessibility()
+        
+        # Set up keyboard navigation
+        self._setup_keyboard_navigation()
+        
         # Focus the search entry when dialog opens
         GLib.idle_add(self.search_entry.grab_focus)
+    
+    def _setup_accessibility(self):
+        """Configure ARIA labels for accessibility"""
+        # Search entry
+        configure_search_accessibility(
+            self.search_entry,
+            _("Search messages across all chats"),
+            _("Enter text to search through all your conversations")
+        )
+        
+        # Results list
+        set_accessible_label(
+            self.results_listbox,
+            _("Search results")
+        )
+    
+    def _setup_keyboard_navigation(self):
+        """Set up keyboard navigation for the search dialog"""
+        try:
+            # Enhance keyboard navigation for results list
+            keyboard_navigation.setup_keyboard_navigation_for_list(self.results_listbox)
+            
+            # Add Escape key handler to close dialog
+            keyboard_navigation.setup_escape_key_handler(self, lambda: self.close())
+            
+            # Make search entry fully keyboard accessible
+            keyboard_navigation.make_entry_keyboard_accessible(self.search_entry)
+            keyboard_navigation.add_focus_css_class(self.search_entry)
+            
+            logger.debug("Keyboard navigation set up for global search dialog")
+        except Exception as e:
+            logger.warning(f"Error setting up keyboard navigation for global search: {e}")
 
     @Gtk.Template.Callback()
     def on_close(self, button=None):
@@ -120,6 +166,13 @@ class GlobalSearch(Adw.Dialog):
         """Create a list box row for a search result"""
         row = Gtk.ListBoxRow()
         row.result = result  # Store result data on the row
+        
+        # Set accessible label for the row
+        accessible_text = _("Search result in {chat}: {preview}").format(
+            chat=result.chat_name,
+            preview=result.message_preview[:100]
+        )
+        set_accessible_label(row, accessible_text)
         
         # Main container
         box = Gtk.Box(
